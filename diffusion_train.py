@@ -40,7 +40,7 @@ class noise_generator():
         alpha_bar = torch.cumprod(1. - torch.linspace(b_0,b_t,T), dim=0)
         self.a1 = torch.cat([torch.ones(1), alpha_bar ** 0.5, torch.zeros(1)])
         self.a2 = torch.cat([torch.zeros(1), (1 - alpha_bar) ** 0.5, torch.ones(1)])
-        self.t_encode = getPositionEncoding(T,time_encoding_dim) 
+        self.t_encode = getPositionEncoding(T+2,time_encoding_dim) 
         
     def apply(self, x0):
         return apply_random_noise(x0,self.a1,self.a2,self.t_encode)
@@ -48,14 +48,7 @@ class noise_generator():
 
 def diff_train(dataset, lr = 1E-4, epochs = 5, batch=32, beta1=0.5, beta2=0.999, T=1000, time_encoding_dim = 32, dmt = 32, load_state = False, state=None):   
     REG = int(batch / dmt)
-    batch -=  REG 
-    
-    if T > 10:
-        ctr_loops = int(T/10)
-    else:
-        ctr_loops = 1
-        
-    print(T,ctr_loops)
+    batch -=  REG
     
     Glosses = []
     
@@ -85,47 +78,44 @@ def diff_train(dataset, lr = 1E-4, epochs = 5, batch=32, beta1=0.5, beta2=0.999,
     
     for eps in trange(epochs):        
         idx_ = torch.randperm(dataset.shape[0])
-        ctr = 1
         
-        while ctr <= ctr_loops:          
-            for b in range(0,dataset.shape[0]-batch,batch):  
+        for b in range(0,dataset.shape[0]-batch,batch):  
                 
-                optimizerG.zero_grad()       
+            optimizerG.zero_grad()       
                 
-                xt1,xt2,t2 = noise.apply(norm(dataset[idx_[b:b+batch]]))
-                xt1,xt2,t2 = xt1.cuda(), xt2.cuda(), t2.cuda()
+            xt1,xt2,t2 = noise.apply(norm(dataset[idx_[b:b+batch]]))
+            xt1,xt2,t2 = xt1.cuda(), xt2.cuda(), t2.cuda()
                 
-                xt1p = Gen(xt2,t2)
+            xt1p = Gen(xt2,t2)
                 
-                errG = error(xt1,xt1p)
-                errG.backward()
-                optimizerG.step()
+            errG = error(xt1,xt1p)
+            errG.backward()
+            optimizerG.step()
     
-                Glosses.append(errG.item())
+            Glosses.append(errG.item())
+            
+            if b % int(dataset.shape[0]/10) == 0 or b == 0:
+                #print(torch.max(xt1),torch.min(xt1),torch.mean(xt1),torch.var(xt1))
+                #print(torch.max(xt2),torch.min(xt2),torch.mean(xt2),torch.var(xt2))
+                #print(torch.max(xt1p),torch.min(xt1p),torch.mean(xt1p),torch.var(xt1p))
+                #dst.visualize(norm(xt1[0]).cpu().detach().numpy(),dark = False, title='X_t1')
+                #dst.visualize(norm(xt2[0]).cpu().detach().numpy(),dark = False, title='X_t2')
+                #dst.visualize(norm(xt1p[0]).cpu().detach().numpy(),dark = True, title='X_t2 -> X_t1')
+                torch.save(Gen.state_dict(), "E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")
                     
-                if ctr % ctr_loops/2 == 0:
-                    print('[%d/%d][%d/%d]\tLoss: %.4f'% (eps, epochs, int(b/batch), int(len(idx_)/batch), errG.item()))  
-                    print(torch.max(xt1),torch.min(xt1),torch.mean(xt1),torch.var(xt1))
-                    print(torch.max(xt2),torch.min(xt2),torch.mean(xt2),torch.var(xt2))
-                    print(torch.max(xt1p),torch.min(xt1p),torch.mean(xt1p),torch.var(xt1p))
-                    dst.visualize(norm(xt1[0]).cpu().detach().numpy(),dark = False, title='X_t1')
-                    dst.visualize(norm(xt2[0]).cpu().detach().numpy(),dark = False, title='X_t2')
-                    dst.visualize(norm(xt1p[0]).cpu().detach().numpy(),dark = True, title='X_t2 -> X_t1')
-                    torch.save(Gen.state_dict(), "E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")
-                        
-                ctr += 1
-                 
+        print('[%d/%d]\tAverage Error: %.4f'% (eps, epochs, sum(Glosses[-int(len(idx_)/batch):])/int(len(idx_)/batch)))  
+                    
       
     return Gen, Glosses
 
 
-def train(T = 1000, Gsave = "E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
+def train(T = 200, Gsave = "E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     
     print('loading data...')
     dataset = dst.torch_celeb_dataset()
     print('done.')
 
-    Gen,Gl = diff_train(dataset=dataset,lr = 1E-4, epochs = 100, batch=32, beta1=0.5, beta2=0.999, T=T, dmt = 32, load_state = False)
+    Gen,Gl = diff_train(dataset=dataset,lr = 1E-4, epochs = 100, batch=32, beta1=0.5, beta2=0.999, T=T, dmt = 32, load_state = True)
    
     dst.plt.figure(figsize=(10,5))
     dst.plt.title("Generator Loss During Training")
@@ -140,9 +130,9 @@ def train(T = 1000, Gsave = "E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     return Gen
 
 
-def gen_img(Gen = None, T = 1000):
+def gen_img(Gen = None, T = 200):
     with torch.no_grad():
-        t_encode = getPositionEncoding(T,time_encoding_dim = 32)
+        t_encode = getPositionEncoding(T,32)
         if Gen is None:
             Gsave = "E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt"
             Gen = models.UNet(3).eval().cuda()
@@ -157,7 +147,7 @@ def gen_img(Gen = None, T = 1000):
             warped = Gen(noise,t_en)
             noise = warped
             
-            if t % 10 == 0:
+            if t % 1 == 0:
                 wd = norm(warped).cpu().detach().numpy()
                 dst.visualize_25(wd,dark=False)
                 del wd
@@ -165,7 +155,6 @@ def gen_img(Gen = None, T = 1000):
     
 def main():
     x = int(input('Would you like to train model(press \'1\') or generate synthetic images from previous state(press \'2\')?'))
-    #x=1
     if x == 1:
         train()
     elif x==2:
