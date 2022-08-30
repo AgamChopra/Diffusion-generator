@@ -43,9 +43,8 @@ class Block(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self,CH=3,t_emb=32):
+    def __init__(self,CH=3,t_emb=32,n=1):
         super(UNet, self).__init__()
-        n = 1
         #layers
         self.layer1 = Block(in_c = CH, embd_dim = t_emb, out_c = int(64/n))
         

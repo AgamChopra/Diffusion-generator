@@ -1,6 +1,7 @@
 import torch
 from tqdm import trange
 import random
+from numpy.random import choice
 
 import diffusion_models as models
 import dataset as dst
@@ -26,7 +27,7 @@ def norm(x):
 def apply_random_noise(x,a1,a2,t_encodings):
     x_epsilon = torch.rand_like(x)
     list_len = len(a1)
-    idx = torch.tensor(random.sample(range(1, list_len), x.shape[0]))
+    idx = torch.tensor(choice(range(1, list_len), x.shape[0]),dtype=torch.long)
     
     x_t1 = a1[idx-1].view(len(idx),1,1,1) * x + a2[idx-1].view(len(idx),1,1,1) * x_epsilon
     x_t2 = a1[idx].view(len(idx),1,1,1) * x + a2[idx].view(len(idx),1,1,1) * x_epsilon
@@ -46,17 +47,29 @@ class noise_generator():
         return apply_random_noise(x0,self.a1,self.a2,self.t_encode)
         
 
-def diff_train(dataset, lr = 1E-4, epochs = 5, batch=32, beta1=0.5, beta2=0.999, T=1000, time_encoding_dim = 32, dmt = 32, load_state = False, state=None):   
-    REG = int(batch / dmt)
-    batch -=  REG
+def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_dim = 32, load_state = False, state=None, loss_type = 'smoothL1'):
     
     Glosses = []
     
     CH = dataset.shape[1]
     
+    print('loading noise generator...')
+    noise = noise_generator(T=T, time_encoding_dim=time_encoding_dim)
+    
+    print('loading error function...')
+    if loss_type == 'l1':
+        error = torch.nn.L1Loss()
+        print('   l1')
+    elif loss_type == 'l2':
+        error = torch.nn.MSELoss()
+        print('   l2')
+    else:
+        error = torch.nn.SmoothL1Loss()
+        print('   smoothL1')
+    
     print('loading generator...', end =" ")
     #Generator 
-    Gen = models.UNet(CH).cuda()
+    Gen = models.UNet(CH=CH,t_emb=time_encoding_dim,n=4).cuda()
     
     if load_state:
         print('loading previous run state...', end =" ")
@@ -66,20 +79,16 @@ def diff_train(dataset, lr = 1E-4, epochs = 5, batch=32, beta1=0.5, beta2=0.999,
     if state is not None:
         Gen.load_state_dict(torch.load(state)) 
     
-    optimizerG = torch.optim.Adam(Gen.parameters(),lr,betas=(beta1, beta2))
-    
-    print('loading noise generator...')
-    noise = noise_generator(T=T, time_encoding_dim=time_encoding_dim)
-    
-    print('loading error function...')
-    error = torch.nn.MSELoss()
+    optimizerG = torch.optim.Adam(Gen.parameters(),lr)
     
     print('optimizing...')
     
-    for eps in trange(epochs):        
+    for eps in range(epochs):  
+        print('Epoch: [%d/%d]'%(eps,epochs))
         idx_ = torch.randperm(dataset.shape[0])
+        Gen.train()
         
-        for b in range(0,dataset.shape[0]-batch,batch):  
+        for b in trange(0,dataset.shape[0]-batch,batch):  
                 
             optimizerG.zero_grad()       
                 
@@ -95,27 +104,43 @@ def diff_train(dataset, lr = 1E-4, epochs = 5, batch=32, beta1=0.5, beta2=0.999,
             Glosses.append(errG.item())
             
             if b % int(dataset.shape[0]/10) == 0 or b == 0:
-                #print(torch.max(xt1),torch.min(xt1),torch.mean(xt1),torch.var(xt1))
-                #print(torch.max(xt2),torch.min(xt2),torch.mean(xt2),torch.var(xt2))
-                #print(torch.max(xt1p),torch.min(xt1p),torch.mean(xt1p),torch.var(xt1p))
-                #dst.visualize(norm(xt1[0]).cpu().detach().numpy(),dark = False, title='X_t1')
-                #dst.visualize(norm(xt2[0]).cpu().detach().numpy(),dark = False, title='X_t2')
-                #dst.visualize(norm(xt1p[0]).cpu().detach().numpy(),dark = True, title='X_t2 -> X_t1')
                 torch.save(Gen.state_dict(), "E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")
                     
-        print('[%d/%d]\tAverage Error: %.4f'% (eps, epochs, sum(Glosses[-int(len(idx_)/batch):])/int(len(idx_)/batch)))  
+        print('\tAverage Error: %.4f'% (sum(Glosses[-int(len(idx_)/batch):])/int(len(idx_)/batch)))  
+        
+        with torch.no_grad():
+            y = torch.rand(1,3,140,140).cuda()
+            Gen.eval()
+            dst.plt.figure(figsize=(T,5))
+            r = 1
+            c = int(T/10) + 1
+            fig = dst.plt.figure(figsize=(c*6,r*6))
+            fig.add_subplot(r,c,1)
+            dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y)).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+            dst.plt.axis('off')
+            ctr = 2
+            for t in range(T):               
+                t_en = noise.t_encode[T-t-1].cuda()
+                y = Gen(y,t_en)        
+                if t%10 == 0:
+                    fig.add_subplot(r,c,ctr)
+                    ctr+=1
+                    dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y)).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+                    dst.plt.axis('off')
+            dst.plt.show()
                     
-      
     return Gen, Glosses
 
 
-def train(T = 200, Gsave = "E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
+def train(T = 200, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     
     print('loading data...')
     dataset = dst.torch_celeb_dataset()
     print('done.')
 
-    Gen,Gl = diff_train(dataset=dataset,lr = 1E-4, epochs = 100, batch=32, beta1=0.5, beta2=0.999, T=T, dmt = 32, load_state = True)
+    Gen,Gl = diff_train(dataset=dataset,lr = 1E-3, epochs = 100, batch=32*6, T=T,loss_type ='l1', load_state = True)
+    
+    torch.save(Gen.state_dict(), Gsave)
    
     dst.plt.figure(figsize=(10,5))
     dst.plt.title("Generator Loss During Training")
@@ -125,32 +150,31 @@ def train(T = 200, Gsave = "E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     dst.plt.ylabel("Loss")
     dst.plt.legend()
     dst.plt.show()
-    
-    torch.save(Gen.state_dict(), Gsave)   
+       
     return Gen
 
 
-def gen_img(Gen = None, T = 200):
+def gen_img(T = 200):    
     with torch.no_grad():
+        Gen = models.UNet(CH=3,t_emb=32,n=4).cuda()
+        Gen.load_state_dict(torch.load("E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")) 
         t_encode = getPositionEncoding(T,32)
-        if Gen is None:
-            Gsave = "E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt"
-            Gen = models.UNet(3).eval().cuda()
-            try:
-                Gen.load_state_dict(torch.load(Gsave))
-            except:
-                print('Warning: Could not load generator parameters at',Gsave)
-        
-        noise = torch.rand((25,3,140,140)).cuda()
+        y = torch.rand(1,3,140,140).cuda()
+        Gen.eval()
+        dst.plt.figure(figsize=(T,5))
+        r = 1
+        c = T+1
+        fig = dst.plt.figure(figsize=(T*4,4))
+        fig.add_subplot(r,c,1)
+        dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y)).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+        dst.plt.axis('off')
         for t in range(T):
             t_en = t_encode[T-t-1].cuda()
-            warped = Gen(noise,t_en)
-            noise = warped
-            
-            if t % 1 == 0:
-                wd = norm(warped).cpu().detach().numpy()
-                dst.visualize_25(wd,dark=False)
-                del wd
+            y = Gen(y,t_en)
+            fig.add_subplot(r,c,t+2)
+            dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y)).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+            dst.plt.axis('off')
+        dst.plt.show()
         
     
 def main():
