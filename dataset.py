@@ -36,18 +36,22 @@ def load_celeb_sample(N=10):
     return human_list
 
 
-def load_cats():
+def load_cats(gr=False):
     cat_list = []
-    for i in range(5650):
-        img = cv2.imread('Dataset\cat_hq\cat (%d).jpg'%(i+1))
-        cat_list.append(cv2.resize(img, dsize=(128, 128), interpolation=cv2.INTER_CUBIC)) 
+    for i in trange(5650):
+        if gr:
+            img = cv2.imread('E:\ML\Dog-Cat-GANs\Dataset\cat_hq\cat (%d).jpg'%(i+1), 0)
+            cat_list.append(np.reshape(cv2.resize(img, dsize=(140, 140), interpolation=cv2.INTER_CUBIC),(1,140,140)))
+        else:
+            img = cv2.imread('E:\ML\Dog-Cat-GANs\Dataset\cat_hq\cat (%d).jpg'%(i+1))
+            cat_list.append(cv2.resize(img, dsize=(140, 140), interpolation=cv2.INTER_CUBIC))
     print('.cat data loaded')
     return cat_list
 
 
 def load_not_cats():
     not_cat_list = []
-    for i in range(5000):
+    for i in trange(5000):
         img = cv2.imread('Dataset\cats\catnt (%d).jpg'%(i+1))
         not_cat_list.append(cv2.resize(img, dsize=(128, 128), interpolation=cv2.INTER_CUBIC))
     print('..not cat data loaded')
@@ -78,9 +82,12 @@ def dataset():
     return np.swapaxes(np.asanyarray(catnt), 1, -1), np.swapaxes(np.asanyarray(cat), 1, -1)
 
 
-def cat_dataset():
-    cat = load_cats()
-    return np.swapaxes(np.asanyarray(cat), 1, -1)
+def cat_dataset(gr=False):
+    cat = load_cats(gr)
+    if gr:
+        return np.swapaxes(np.asanyarray(cat), 2, -1)
+    else:
+        return np.swapaxes(np.asanyarray(cat), 1, -1)
 
 
 def dog_dataset():
@@ -202,8 +209,8 @@ def torch_celeb_dataset_sample(N=10):
     return data
 
 
-def torch_cat_dataset():
-    data = cat_dataset()
+def torch_cat_dataset(gr=False):
+    data = cat_dataset(gr)
     data = torch.from_numpy(data).to(dtype = torch.float)
     return data
 
@@ -215,12 +222,15 @@ def torch_photo_dataset():
 
 
 def main():
-    data = celeb_dataset()
+    data = cat_dataset(True)#celeb_dataset()
     print(data.shape)
     visualize_25(data[0:25])
     visualize(data[0])
-    #data = torch_celeb_dataset()
-    #print(data[0], data.max(),data.min())
+# =============================================================================
+#     data = torch_cat_dataset(True)
+#     print(data.shape)
+#     print(data[0], data.max(),data.min())
+# =============================================================================
     
 
 if __name__ == '__main__':
