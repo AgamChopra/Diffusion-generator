@@ -20,13 +20,13 @@ class Block(nn.Module):
         super(Block, self).__init__()
         
         if hid_c is None:
-            self.mlp = nn.Linear(embd_dim,out_c)
+            self.mlp = nn.Sequential(nn.Linear(embd_dim,out_c),nn.ReLU())
             
             self.layer = nn.Sequential(nn.Conv2d(in_channels = in_c, out_channels = out_c, kernel_size = 3),nn.ReLU(),nn.BatchNorm2d(out_c))
             
             self.out_block = nn.Sequential(nn.Conv2d(in_channels = out_c, out_channels = out_c, kernel_size = 3),nn.ReLU(),nn.BatchNorm2d(out_c))
         else:
-            self.mlp = nn.Linear(embd_dim,hid_c)
+            self.mlp = nn.Sequential(nn.Linear(embd_dim,hid_c),nn.ReLU())
             
             self.layer = nn.Sequential(nn.Conv2d(in_channels = in_c, out_channels = hid_c, kernel_size = 3),nn.ReLU(),nn.BatchNorm2d(hid_c))
             
@@ -66,22 +66,28 @@ class UNet(nn.Module):
         
         self.out = nn.Conv2d(in_channels = int(64/n), out_channels = CH, kernel_size = 1)
         
-        self.maxpool = nn.MaxPool2d(kernel_size=2,stride=2)
+        self.pool1 = nn.Conv2d(in_channels=int(64/n),out_channels=int(64/n),kernel_size=2,stride=2)
+        
+        self.pool2 = nn.Conv2d(in_channels=int(128/n),out_channels=int(128/n),kernel_size=2,stride=2)
+        
+        self.pool3 = nn.Conv2d(in_channels=int(256/n),out_channels=int(256/n),kernel_size=2,stride=2)
+        
+        self.pool4 = nn.Conv2d(in_channels=int(512/n),out_channels=int(512/n),kernel_size=2,stride=2)
         
         
     def forward(self,x,t,device = 'cuda:0'):
         
         y1 = self.layer1(x,t)
-        y = self.maxpool(y1)
+        y = self.pool1(y1)
         
         y2 = self.layer2(y,t)
-        y = self.maxpool(y2)
+        y = self.pool2(y2)
         
         y3 = self.layer3(y,t)
-        y = self.maxpool(y3)
+        y = self.pool3(y3)
         
         y4 = self.layer4(y,t)
-        y = self.maxpool(y4)
+        y = self.pool4(y4)
         
         y = self.layer5(y,t)
         

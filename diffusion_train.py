@@ -128,9 +128,9 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
             file.writelines(str(av_ls)+'\n')
             file.close()
         
-        if eps % 10 == 0: 
+        if eps % 2 == 0: 
             with torch.no_grad():
-                t_ = 75
+                t_ = 20
                 y = torch.rand(batch,dataset.shape[1],dataset.shape[2],dataset.shape[3]).cuda()
                 Gen.eval()
                 dst.plt.figure(figsize=(T,5))
@@ -154,13 +154,13 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     return Gen, Glosses
 
 
-def train(T = 300, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
+def train(T = 100, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     
     print('loading data...')
     dataset = dst.torch_cat_dataset(True)#torch_celeb_dataset()
     print('done.')
 
-    Gen,Gl = diff_train(dataset = dataset, lr = 1E-6, epochs = 40000, batch = 32, T=T,loss_type ='smoothl1', load_state = True, time_encoding_dim = 256)
+    Gen,Gl = diff_train(dataset = dataset, lr = 1E-4, epochs = 1000, batch = 16, T=T,loss_type ='l1', load_state = False, time_encoding_dim = 32)
     
     torch.save(Gen.state_dict(), Gsave)
    
