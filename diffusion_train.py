@@ -10,11 +10,11 @@ print('cuda detected:',torch.cuda.is_available())
 
 DATASET = dst.torch_car_dataset(True)
 T_ENC = 256
-T_DIFF = 100
-N_UNET = 2
-LR = 1E-3
+T_DIFF = 200
+N_UNET = 16
+LR = 1E-4
 EPS = 1000
-BATCH = 64
+BATCH = 512
 LOSS_TYPE = 'l1'
 CH = DATASET.shape[1]
 T_PRINT = 5
@@ -186,25 +186,24 @@ def train(T = T_DIFF, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML
 
 def gen_img(T = T_DIFF):    
     with torch.no_grad():
+        r = 1
+        c = 10
+        
         Gen = models.UNet(CH=CH,t_emb=T_ENC,n=N_UNET).cuda()
         Gen.load_state_dict(torch.load("E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")) 
         t_encode = getPositionEncoding(T,T_ENC)
-        y = torch.rand(1,CH,140,140).cuda()
+        y = torch.rand(c,CH,140,140).cuda()
         Gen.eval()
-        dst.plt.figure(figsize=(T,5))
-        r = 1
-        c = T+1
-        fig = dst.plt.figure(figsize=(T*4,4))
-        fig.add_subplot(r,c,1)
-        dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y)).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
-        dst.plt.axis('off')
+             
         for t in range(T):
             t_en = t_encode[T-t-1].cuda()
             y = Gen(y,t_en)
-            fig.add_subplot(r,c,t+2)
-            dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y)).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
-            dst.plt.axis('off')
-        dst.plt.show()
+            fig = dst.plt.figure(figsize=(15,8),dpi=250) 
+            for i in range(c):
+                fig.add_subplot(r,c,i+1)
+                dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y[i])).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+                dst.plt.axis('off')
+            dst.plt.show()
         
     
 def main():
