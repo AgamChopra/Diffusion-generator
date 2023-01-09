@@ -6,15 +6,25 @@ from torchvision import transforms as tf
 import diffusion_models as models
 import dataset as dst
 
-
 print('cuda detected:',torch.cuda.is_available())
+
+DATASET = dst.torch_car_dataset(True)
+T_ENC = 256
+T_DIFF = 100
+N_UNET = 2
+LR = 1E-3
+EPS = 1000
+BATCH = 64
+LOSS_TYPE = 'l1'
+CH = DATASET.shape[1]
+T_PRINT = 5
 
 
 class rand_augment():
     def __init__(self):
         self.aug =tf.Compose([tf.RandomRotation(2),tf.ColorJitter(),tf.RandomVerticalFlip()])
     def __call__(self,x):
-        return self.aug(x)
+        return x#self.aug(x)
 
 
 def getPositionEncoding(seq_len, d=512, n=10000):
@@ -67,8 +77,6 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     
     Glosses = []
     
-    CH = dataset.shape[1]
-    
     print('loading noise generator...')
     noise = noise_generator(T=T, time_encoding_dim=time_encoding_dim)
     
@@ -85,7 +93,7 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     
     print('loading generator...', end =" ")
     #Generator 
-    Gen = models.UNet(CH=CH,t_emb=time_encoding_dim,n=1).cuda()
+    Gen = models.UNet(CH=CH,t_emb=time_encoding_dim,n=N_UNET).cuda()
     
     if load_state:
         print('loading previous run state...', end =" ")
@@ -130,7 +138,7 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
         
         if eps % 1 == 0: 
             with torch.no_grad():
-                t_ = 5
+                t_ = int(T / T_PRINT)
                 y = torch.rand(batch,dataset.shape[1],dataset.shape[2],dataset.shape[3]).cuda()
                 Gen.eval()
                 dst.plt.figure(figsize=(T,5))
@@ -154,13 +162,13 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     return Gen, Glosses
 
 
-def train(T = 20, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
+def train(T = T_DIFF, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     
     print('loading data...')
-    dataset = dst.torch_cat_dataset(True)#dst.torch_celeb_dataset()#dst.torch_cat_dataset(True)
+    dataset = DATASET#dst.torch_car_dataset(True)#dst.torch_celeb_dataset()#dst.torch_cat_dataset(True)
     print('done.')
 
-    Gen,Gl = diff_train(dataset = dataset, lr = 1E-3, epochs = 100, batch = 32, T=T,loss_type ='l1', load_state = False, time_encoding_dim = 256)
+    Gen,Gl = diff_train(dataset = dataset, lr = LR, epochs = EPS, batch = BATCH, T=T,loss_type =LOSS_TYPE, load_state = False, time_encoding_dim = T_ENC)
     
     torch.save(Gen.state_dict(), Gsave)
    
@@ -176,12 +184,12 @@ def train(T = 20, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML\Dog
     return Gen
 
 
-def gen_img(T = 500):    
+def gen_img(T = T_DIFF):    
     with torch.no_grad():
-        Gen = models.UNet(CH=3,t_emb=32,n=1).cuda()
+        Gen = models.UNet(CH=CH,t_emb=T_ENC,n=N_UNET).cuda()
         Gen.load_state_dict(torch.load("E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")) 
-        t_encode = getPositionEncoding(T,32)
-        y = torch.rand(1,3,140,140).cuda()
+        t_encode = getPositionEncoding(T,T_ENC)
+        y = torch.rand(1,CH,140,140).cuda()
         Gen.eval()
         dst.plt.figure(figsize=(T,5))
         r = 1

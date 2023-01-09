@@ -49,6 +49,19 @@ def load_cats(gr=False):
     return cat_list
 
 
+def load_cars(gr=False):
+    cat_list = []
+    for i in trange(16185):
+        if gr:
+            img = cv2.imread('E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'%(i+1), 0)
+            cat_list.append(np.reshape(cv2.resize(img, dsize=(140, 140), interpolation=cv2.INTER_CUBIC),(1,140,140)))
+        else:
+            img = cv2.imread('E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'%(i+1))
+            cat_list.append(cv2.resize(img, dsize=(140, 140), interpolation=cv2.INTER_CUBIC))
+    print('.car data loaded')
+    return cat_list
+
+
 def load_not_cats():
     not_cat_list = []
     for i in trange(5000):
@@ -89,6 +102,13 @@ def cat_dataset(gr=False):
     else:
         return np.swapaxes(np.asanyarray(cat), 1, -1)
 
+
+def car_dataset(gr=False):
+    car = load_cars(gr)
+    if gr:
+        return np.swapaxes(np.asanyarray(car), 2, -1)
+    else:
+        return np.swapaxes(np.asanyarray(car), 1, -1)
 
 def dog_dataset():
     dog = load_not_cats()
@@ -215,6 +235,12 @@ def torch_cat_dataset(gr=False):
     return data
 
 
+def torch_car_dataset(gr=False):
+    data = car_dataset(gr)
+    data = torch.from_numpy(data).to(dtype = torch.float)
+    return data
+
+
 def torch_photo_dataset():
     data = photo_dataset()
     data = torch.from_numpy(data).to(dtype = torch.float)
@@ -222,7 +248,7 @@ def torch_photo_dataset():
 
 
 def main():
-    data = cat_dataset(True)#celeb_dataset()
+    data = car_dataset(True)#celeb_dataset()
     print(data.shape)
     visualize_25(data[0:25])
     visualize(data[0])
