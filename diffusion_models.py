@@ -24,13 +24,13 @@ class Block(nn.Module):
             
             self.layer = nn.Sequential(nn.Conv2d(in_channels = in_c, out_channels = out_c, kernel_size = 3),nn.ReLU(),nn.BatchNorm2d(out_c))
             
-            self.out_block = nn.Sequential(nn.Conv2d(in_channels = out_c, out_channels = out_c, kernel_size = 3),nn.ReLU(),nn.BatchNorm2d(out_c))
+            self.out_block = nn.Sequential(nn.Conv2d(in_channels = out_c, out_channels = out_c, kernel_size = 2),nn.ReLU(),nn.BatchNorm2d(out_c))
         else:
             self.mlp = nn.Sequential(nn.Linear(embd_dim,hid_c),nn.ReLU())
             
             self.layer = nn.Sequential(nn.Conv2d(in_channels = in_c, out_channels = hid_c, kernel_size = 3),nn.ReLU(),nn.BatchNorm2d(hid_c))
             
-            self.out_block = nn.Sequential(nn.Conv2d(in_channels = hid_c, out_channels = hid_c, kernel_size = 3),nn.ReLU(),nn.BatchNorm2d(hid_c),
+            self.out_block = nn.Sequential(nn.Conv2d(in_channels = hid_c, out_channels = hid_c, kernel_size = 2),nn.ReLU(),nn.BatchNorm2d(hid_c),
                                            nn.ConvTranspose2d(in_channels = hid_c, out_channels = out_c, kernel_size = 2, stride= 2),nn.ReLU(),nn.BatchNorm2d(out_c))
         
     def forward(self,x,t):
@@ -46,7 +46,11 @@ class UNet(nn.Module):
     def __init__(self,CH=3,t_emb=32,n=1):
         super(UNet, self).__init__()
         #layers
-        self.layer1 = Block(in_c = CH, embd_dim = t_emb, out_c = int(64/n))
+        self.time_mlp = nn.Sequential(nn.Linear(t_emb, t_emb),nn.ReLU())
+        
+        self.layer0 = nn.Conv2d(CH, int(32/n), 3, 1)
+
+        self.layer1 = Block(in_c = int(32/n), embd_dim = t_emb, out_c = int(64/n))
         
         self.layer2 = Block(in_c = int(64/n), embd_dim = t_emb, out_c = int(128/n))
         
@@ -76,8 +80,10 @@ class UNet(nn.Module):
         
         
     def forward(self,x,t,device = 'cuda:0'):
+        y = self.layer0(x)
+        t = self.time_mlp(t)
         
-        y1 = self.layer1(x,t)
+        y1 = self.layer1(y,t)
         y = self.pool1(y1)
         
         y2 = self.layer2(y,t)
@@ -111,7 +117,7 @@ class UNet(nn.Module):
     
 
 def test(device = 'cpu'):
-    batch = 32
+    batch = 1
     a = torch.ones((batch,3,140,140),device=device)
     t = torch.ones((batch,32),device=device)
     
@@ -122,6 +128,14 @@ def test(device = 'cpu'):
     
     print(a.shape,t.shape)
     print(b.shape)
+    
+    from matplotlib import pyplot as plt
+    
+    plt.imshow(a[0].T.detach().cpu().numpy())
+    plt.show()
+    
+    plt.imshow(b[0].T.detach().cpu().numpy())
+    plt.show()
         
         
 if __name__ == '__main__':
