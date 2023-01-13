@@ -53,10 +53,10 @@ def load_cars(gr=False):
     cat_list = []
     for i in trange(16185):
         if gr:
-            img = cv2.imread('E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'%(i+1), 0)
+            img = cv2.imread('/home/agam/Downloads/car_ims/car%d.jpg'%(i+1), 0)#'E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'
             cat_list.append(np.reshape(cv2.resize(img, dsize=(140, 140), interpolation=cv2.INTER_CUBIC),(1,140,140)))
         else:
-            img = cv2.imread('E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'%(i+1))
+            img = cv2.imread('/home/agam/Downloads/car_ims/car%d.jpg'%(i+1))#'E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'
             cat_list.append(cv2.resize(img, dsize=(140, 140), interpolation=cv2.INTER_CUBIC))
     print('.car data loaded')
     return cat_list

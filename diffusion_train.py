@@ -8,16 +8,17 @@ import dataset as dst
 
 print('cuda detected:',torch.cuda.is_available())
 
+MODE = int(input('train model(press \'1\') generate synthetic images from previous state(press \'2\'): '))
 DATASET = dst.torch_car_dataset(True)
 T_ENC = 256
-T_DIFF = 200
-N_UNET = 16
+T_DIFF = 1000
+N_UNET = 0.5
 LR = 1E-4
 EPS = 1000
-BATCH = 512
-LOSS_TYPE = 'l1'
+BATCH = 64
+LOSS_TYPE = 'smoothl1'
 CH = DATASET.shape[1]
-T_PRINT = 5
+T_PRINT = 4
 
 
 class rand_augment():
@@ -68,7 +69,7 @@ class noise_generator():
 def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_dim = 32, load_state = False, state=None, loss_type = 'smoothL1'):
     
     if not load_state:
-        with open('E:\ML\Dog-Cat-GANs\diffuse_training_log.txt', 'w') as file:
+        with open('/home/agam/Documents/diffusion_logs/diffuse_training_log.txt', 'w') as file:
             file.write('lr = %f, epochs = %d, batch = %d, T = %d, time_encoding_dim = %d, loss_type = %s\n'%(lr, epochs, batch, T, time_encoding_dim, loss_type))
             file.write('Average losses per epoch:\n')
             file.close()
@@ -97,7 +98,7 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     
     if load_state:
         print('loading previous run state...', end =" ")
-        Gen.load_state_dict(torch.load("E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")) 
+        Gen.load_state_dict(torch.load("/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt")) 
         print('done.')
         
     if state is not None:
@@ -127,16 +128,25 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     
             Glosses.append(errG.item())
             
-            if b % int(dataset.shape[0]/10) == 0 or b == 0:
-                torch.save(Gen.state_dict(), "E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")
+        if eps % 10 == 0:
+            torch.save(Gen.state_dict(), "/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt")
         
         av_ls = sum(Glosses[-int(len(idx_)/batch):])/int(len(idx_)/batch)
         print('\tAverage Error: %.10f'%(av_ls))         
-        with open('E:\ML\Dog-Cat-GANs\diffuse_training_log.txt', 'a') as file:
+        with open('/home/agam/Documents/diffusion_logs/diffuse_training_log.txt', 'a') as file:
             file.writelines(str(av_ls)+'\n')
             file.close()
         
-        if eps % 1 == 0: 
+        if eps % 20 == 0:           
+            dst.plt.figure(figsize=(10,5))
+            dst.plt.title("Loss Training")
+            dst.plt.plot(Glosses, label='loss')
+            dst.plt.legend()
+            dst.plt.xlabel("iterations")
+            dst.plt.ylabel("Loss")
+            dst.plt.legend()
+            dst.plt.show()
+            
             with torch.no_grad():
                 t_ = int(T / T_PRINT)
                 y = torch.rand(batch,dataset.shape[1],dataset.shape[2],dataset.shape[3]).cuda()
@@ -162,7 +172,7 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     return Gen, Glosses
 
 
-def train(T = T_DIFF, Gsave = 'E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
+def train(T = T_DIFF, Gsave = '/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     
     print('loading data...')
     dataset = DATASET#dst.torch_car_dataset(True)#dst.torch_celeb_dataset()#dst.torch_cat_dataset(True)
@@ -190,7 +200,7 @@ def gen_img(T = T_DIFF):
         c = 10
         
         Gen = models.UNet(CH=CH,t_emb=T_ENC,n=N_UNET).cuda()
-        Gen.load_state_dict(torch.load("E:\ML\Dog-Cat-GANs\Gen-diff-Autosave.pt")) 
+        Gen.load_state_dict(torch.load("/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt")) 
         t_encode = getPositionEncoding(T,T_ENC)
         y = torch.rand(c,CH,140,140).cuda()
         Gen.eval()
@@ -206,11 +216,10 @@ def gen_img(T = T_DIFF):
             dst.plt.show()
         
     
-def main():
-    x = int(input('Would you like to train model(press \'1\') or generate synthetic images from previous state(press \'2\')?'))
-    if x == 1:
+def main():   
+    if MODE == 1:
         train()
-    elif x==2:
+    elif MODE==2:
         gen_img()
     else:
         print('Value Error: Please enter either 1 or 2')
