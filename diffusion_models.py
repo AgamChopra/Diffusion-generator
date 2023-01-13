@@ -48,9 +48,7 @@ class UNet(nn.Module):
         #layers
         self.time_mlp = nn.Sequential(nn.Linear(t_emb, t_emb),nn.ReLU())
         
-        self.layer0 = nn.Conv2d(CH, int(32/n), 3, 1)
-
-        self.layer1 = Block(in_c = int(32/n), embd_dim = t_emb, out_c = int(64/n))
+        self.layer1 = nn.Conv2d(CH, int(64/n), 3, 1)
         
         self.layer2 = Block(in_c = int(64/n), embd_dim = t_emb, out_c = int(128/n))
         
@@ -64,13 +62,9 @@ class UNet(nn.Module):
         
         self.layer7 = Block(in_c = int(512/n), embd_dim = t_emb, out_c = int(128/n), hid_c = int(256/n))
         
-        self.layer8 = Block(in_c = int(256/n), embd_dim = t_emb, out_c = int(64/n), hid_c = int(128/n))
-        
-        self.layer9 = Block(in_c = int(128/n), embd_dim = t_emb, out_c = int(64/n))
+        self.layer8 = Block(in_c = int(256/n), embd_dim = t_emb, out_c = int(64/n))
         
         self.out = nn.Conv2d(in_channels = int(64/n), out_channels = CH, kernel_size = 1)
-        
-        self.pool1 = nn.Conv2d(in_channels=int(64/n),out_channels=int(64/n),kernel_size=2,stride=2)
         
         self.pool2 = nn.Conv2d(in_channels=int(128/n),out_channels=int(128/n),kernel_size=2,stride=2)
         
@@ -80,11 +74,8 @@ class UNet(nn.Module):
         
         
     def forward(self,x,t,device = 'cuda:0'):
-        y = self.layer0(x)
-        t = self.time_mlp(t)
-        
-        y1 = self.layer1(y,t)
-        y = self.pool1(y1)
+        t = self.time_mlp(t)        
+        y = self.layer1(x)
         
         y2 = self.layer2(y,t)
         y = self.pool2(y2)
@@ -106,9 +97,6 @@ class UNet(nn.Module):
         y = torch.cat((y2,pad2d(y, y2, device = device)),dim = 1)
         y = self.layer8(y,t)
         
-        y = torch.cat((y1,pad2d(y, y1, device = device)),dim = 1)
-        y = self.layer9(y,t)
-        
         y = pad2d(y, x, device = device)
         
         y = self.out(y)
@@ -118,7 +106,7 @@ class UNet(nn.Module):
 
 def test(device = 'cpu'):
     batch = 1
-    a = torch.ones((batch,3,128,128),device=device)
+    a = torch.ones((batch,3,64,64),device=device)
     t = torch.ones((batch,32),device=device)
     
     model = UNet().to(device)
