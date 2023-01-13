@@ -118,7 +118,7 @@ class UNet(nn.Module):
 
 def test(device = 'cpu'):
     batch = 1
-    a = torch.ones((batch,3,140,140),device=device)
+    a = torch.ones((batch,3,128,128),device=device)
     t = torch.ones((batch,32),device=device)
     
     model = UNet().to(device)
