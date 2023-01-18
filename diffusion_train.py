@@ -10,13 +10,13 @@ print('cuda detected:',torch.cuda.is_available())
 
 MODE = int(input('train model(press \'1\') generate synthetic images from previous state(press \'2\'): '))
 DATASET = dst.torch_car_dataset(True)
-T_ENC = 256
+T_ENC = 128
 T_DIFF = 1000
-N_UNET = 0.5
-LR = 1E-4
-EPS = 1000
-BATCH = 64
-LOSS_TYPE = 'smoothl1'
+N_UNET = 1
+LR = 1E-3
+EPS = 5000
+BATCH = 512
+LOSS_TYPE = 'l1'
 CH = DATASET.shape[1]
 T_PRINT = 4
 
@@ -43,27 +43,37 @@ def norm(x):
 
 
 def apply_random_noise(x,a1,a2,t_encodings):
+    #print(len(a1), len(a2), len(t_encodings))
     x_epsilon = torch.rand_like(x)
     list_len = len(a1)
-    idx = torch.tensor(choice(range(0, list_len), x.shape[0]),dtype=torch.long)
-    #idx = torch.tensor(choice(range(1, list_len), x.shape[0]),dtype=torch.long)
-    
-    x_t1 = a1[idx-1].view(len(idx),1,1,1) * x + a2[idx-1].view(len(idx),1,1,1) * x_epsilon
+    idx = torch.tensor(choice(range(0, list_len - 1), x.shape[0]),dtype=torch.long)
+    #idx = torch.tensor(choice(range(1, list_len), x.shape[0]),dtype=torch.long)    
+    #x_t1 = a1[idx-1].view(len(idx),1,1,1) * x + a2[idx-1].view(len(idx),1,1,1) * x_epsilon
     x_t2 = a1[idx].view(len(idx),1,1,1) * x + a2[idx].view(len(idx),1,1,1) * x_epsilon
     t2 = t_encodings[idx]
     
-    return x_t1, x_t2, t2
+    return x_t2, t2, x_epsilon
 
+
+def get_alphas(T = 300, b_0 = 0.0001, b_t = 0.02):
+    alpha_bar = torch.cumprod(1. - torch.linspace(b_0,b_t,T), dim=0)
+    a1 = alpha_bar ** 0.5
+    a2 = (1 - alpha_bar) ** 0.5
+    return a1, a2
+    
 
 class noise_generator():
-    def __init__(self, T = 300, b_0 = 0.0001, b_t = 0.02, time_encoding_dim = 128):
-        alpha_bar = torch.cumprod(1. - torch.linspace(b_0,b_t,T), dim=0)
-        self.a1 = torch.cat([torch.ones(1), alpha_bar ** 0.5, torch.zeros(1)])
-        self.a2 = torch.cat([torch.zeros(1), (1 - alpha_bar) ** 0.5, torch.ones(1)])
-        self.t_encode = getPositionEncoding(T+2,time_encoding_dim) 
+    def __init__(self, T = 300, time_encoding_dim = 128):
+        self.a1, self.a2 = get_alphas(T = T)
+        self.t_encode = getPositionEncoding(T,time_encoding_dim) #getPositionEncoding(T+2,time_encoding_dim) 
         
     def apply(self, x0):
         return apply_random_noise(x0,self.a1,self.a2,self.t_encode)
+    
+
+def remove_noise(X_2, noise, a1, a2):
+    X_1 = (X_2 - a2 * noise) / a1
+    return X_1
         
 
 def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_dim = 32, load_state = False, state=None, loss_type = 'smoothL1'):
@@ -117,12 +127,12 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
                 
             optimizerG.zero_grad()       
                 
-            xt1,xt2,t2 = noise.apply(norm(aug(dataset[idx_[b:b+batch]])))
-            xt1,xt2,t2 = xt1.cuda(), xt2.cuda(), t2.cuda()
+            xt2,t2,psi = noise.apply(norm(aug(dataset[idx_[b:b+batch]])))
+            xt2,t2,psi = xt2.cuda(), t2.cuda(), psi.cuda()
                 
-            xt1p = Gen(xt2,t2)
+            psi_p = Gen(xt2,t2)
                 
-            errG = error(xt1,xt1p)
+            errG = error(psi,psi_p)
             errG.backward()
             optimizerG.step()
     
@@ -148,6 +158,7 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
             dst.plt.show()
             
             with torch.no_grad():
+                a1, a2 = get_alphas(T = T)
                 t_ = int(T / T_PRINT)
                 y = torch.rand(batch,dataset.shape[1],dataset.shape[2],dataset.shape[3]).cuda()
                 Gen.eval()
@@ -161,7 +172,11 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
                 ctr = 2
                 for t in range(T):               
                     t_en = noise.t_encode[T-t-1].cuda()
-                    y = Gen(y,t_en)        
+                    
+                    psi = Gen(y,t_en)        
+                    
+                    y = remove_noise(y, psi, a1[T-t-1].cuda(), a2[T-t-1].cuda())
+                    
                     if t%t_ == 0:
                         fig.add_subplot(r,c,ctr)
                         ctr+=1
