@@ -48,7 +48,7 @@ class UNet(nn.Module):
         #layers
         self.time_mlp = nn.Sequential(nn.Linear(t_emb, t_emb),nn.ReLU())
         
-        self.layer1 = nn.Conv2d(CH, int(64/n), 3, 1)
+        self.layer1 = nn.Sequential(nn.Conv2d(CH, int(64/n), 2, 1),nn.ReLU(),nn.BatchNorm2d(int(64/n)))
         
         self.layer2 = Block(in_c = int(64/n), embd_dim = t_emb, out_c = int(128/n))
         
@@ -109,7 +109,7 @@ def test(device = 'cpu'):
     a = torch.ones((batch,3,64,64),device=device)
     t = torch.ones((batch,32),device=device)
     
-    model = UNet().to(device)
+    model = UNet(n=0.125).to(device)
     print(model)
     
     b = model(a,t,device)
@@ -127,7 +127,7 @@ def test(device = 'cpu'):
         
         
 if __name__ == '__main__':
-    test('cpu')
+    test('cuda:0')
     
 '''
 import torch

@@ -9,13 +9,13 @@ import dataset as dst
 print('cuda detected:',torch.cuda.is_available())
 
 MODE = int(input('train model(press \'1\') generate synthetic images from previous state(press \'2\'): '))
-DATASET = dst.torch_car_dataset(True)
-T_ENC = 128
-T_DIFF = 1000
-N_UNET = 1
-LR = 1E-3
-EPS = 5000
-BATCH = 512
+DATASET = dst.torch_car_dataset(False)
+T_ENC = 32
+T_DIFF = 300
+N_UNET = 0.25
+LR = 1E-4
+EPS = 1000
+BATCH = 64
 LOSS_TYPE = 'l1'
 CH = DATASET.shape[1]
 T_PRINT = 4
