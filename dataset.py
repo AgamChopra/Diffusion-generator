@@ -49,15 +49,15 @@ def load_cats(gr=False):
     return cat_list
 
 
-def load_cars(gr=False):
+def load_cars(gr=False,n=1):
     cat_list = []
     for i in trange(16185):
         if gr:
             img = cv2.imread('/home/agam/Downloads/car_ims/car%d.jpg'%(i+1), 0)#'E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'
-            cat_list.append(np.reshape(cv2.resize(img, dsize=(64, 64), interpolation=cv2.INTER_LINEAR),(1,64, 64)))
+            cat_list.append(np.reshape(cv2.resize(img, dsize=(64*n, 64*n), interpolation=cv2.INTER_LINEAR),(1,64*n, 64*n)))
         else:
             img = cv2.imread('/home/agam/Downloads/car_ims/car%d.jpg'%(i+1))#'E:\ML\Dog-Cat-GANs\Dataset\car_ims\car (%d).jpg'
-            cat_list.append(cv2.resize(img, dsize=(64, 64), interpolation=cv2.INTER_LINEAR))
+            cat_list.append(cv2.resize(img, dsize=(64*n, 64*n), interpolation=cv2.INTER_LINEAR))
     print('.car data loaded')
     return cat_list
 
@@ -103,8 +103,8 @@ def cat_dataset(gr=False):
         return np.swapaxes(np.asanyarray(cat), 1, -1)
 
 
-def car_dataset(gr=False):
-    car = load_cars(gr)
+def car_dataset(gr=False,n=1):
+    car = load_cars(gr,n)
     if gr:
         return np.swapaxes(np.asanyarray(car), 2, -1)
     else:
@@ -235,8 +235,8 @@ def torch_cat_dataset(gr=False):
     return data
 
 
-def torch_car_dataset(gr=False):
-    data = car_dataset(gr)
+def torch_car_dataset(gr=False,n=1):
+    data = car_dataset(gr,n)
     data = torch.from_numpy(data).to(dtype = torch.float)
     return data
 

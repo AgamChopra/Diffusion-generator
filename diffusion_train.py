@@ -9,13 +9,25 @@ import dataset as dst
 print('cuda detected:',torch.cuda.is_available())
 
 MODE = int(input('train model(press \'1\') generate synthetic images from previous state(press \'2\'): '))
-DATASET = dst.torch_car_dataset(False)
-T_ENC = 32
-T_DIFF = 300
-N_UNET = 0.25
-LR = 1E-4
+if MODE == 1:
+    load_checkpoint = input('Continue training from previous checkpoint? (yes/no)')
+    if load_checkpoint == 'yes':
+        CT = True
+    elif load_checkpoint == 'no':
+        CT = False
+    else:
+        print('Incorrect value, using fresh model')
+        CT = False
+    DATASET = dst.torch_car_dataset(False,2)#torch.zeros((1,3,128,128))#
+else:
+    DATASET = torch.zeros((1,int(input('Channel size:')),int(input('Height:')),int(input('Width:'))))
+    
+T_ENC = 64
+T_DIFF = 1000
+N_UNET = 0.5
+LR = 2E-5
 EPS = 1000
-BATCH = 64
+BATCH = 32
 LOSS_TYPE = 'l1'
 CH = DATASET.shape[1]
 T_PRINT = 4
@@ -71,8 +83,8 @@ class noise_generator():
         return apply_random_noise(x0,self.a1,self.a2,self.t_encode)
     
 
-def remove_noise(X_2, noise, a1, a2):
-    X_1 = (X_2 - a2 * noise) / a1
+def remove_noise(X_2, noise, a1_1, a2_1, a1_2, a2_2):
+    X_1 = X_2 - noise * (a1_1 * a2_2 - a1_2 * a2_1)
     return X_1
         
 
@@ -171,12 +183,9 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
                 dst.plt.axis('off')
                 ctr = 2
                 for t in range(T):               
-                    t_en = noise.t_encode[T-t-1].cuda()
-                    
-                    psi = Gen(y,t_en)        
-                    
-                    y = remove_noise(y, psi, a1[T-t-1].cuda(), a2[T-t-1].cuda())
-                    
+                    t_en = noise.t_encode[T-t-1].cuda()                   
+                    psi = Gen(y,t_en)                          
+                    y = remove_noise(y, psi, a1[T-t-1].cuda(), a2[T-t-1].cuda(), a1[T-t-2].cuda(), a2[T-t-2].cuda())                   
                     if t%t_ == 0:
                         fig.add_subplot(r,c,ctr)
                         ctr+=1
@@ -187,13 +196,13 @@ def diff_train(dataset, lr = 1E-2, epochs = 5, batch=32, T=1000, time_encoding_d
     return Gen, Glosses
 
 
-def train(T = T_DIFF, Gsave = '/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt'):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
+def train(T = T_DIFF, Gsave = '/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt', continue_trn = False):#"E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
     
     print('loading data...')
     dataset = DATASET#dst.torch_car_dataset(True)#dst.torch_celeb_dataset()#dst.torch_cat_dataset(True)
     print('done.')
 
-    Gen,Gl = diff_train(dataset = dataset, lr = LR, epochs = EPS, batch = BATCH, T=T,loss_type =LOSS_TYPE, load_state = False, time_encoding_dim = T_ENC)
+    Gen,Gl = diff_train(dataset = dataset, lr = LR, epochs = EPS, batch = BATCH, T=T,loss_type =LOSS_TYPE, load_state = continue_trn, time_encoding_dim = T_ENC)
     
     torch.save(Gen.state_dict(), Gsave)
    
@@ -217,23 +226,30 @@ def gen_img(T = T_DIFF):
         Gen = models.UNet(CH=CH,t_emb=T_ENC,n=N_UNET).cuda()
         Gen.load_state_dict(torch.load("/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt")) 
         t_encode = getPositionEncoding(T,T_ENC)
-        y = torch.rand(c,CH,140,140).cuda()
+        y = torch.rand(c,CH,DATASET.shape[2],DATASET.shape[3]).cuda()
         Gen.eval()
              
-        for t in range(T):
+        a1, a2 = get_alphas(T = T)
+        
+        t_ = int(T / T_PRINT)
+        for t in trange(T):               
             t_en = t_encode[T-t-1].cuda()
-            y = Gen(y,t_en)
-            fig = dst.plt.figure(figsize=(15,8),dpi=250) 
-            for i in range(c):
-                fig.add_subplot(r,c,i+1)
-                dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y[i])).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
-                dst.plt.axis('off')
-            dst.plt.show()
+            
+            psi = Gen(y,t_en)        
+            y = remove_noise(y, psi, a1[T-t-1].cuda(), a2[T-t-1].cuda(), a1[T-t-2].cuda(), a2[T-t-2].cuda())
+
+            if t%t_ == 0:
+                fig = dst.plt.figure(figsize=(15,8),dpi=250)
+                for i in range(c):
+                    fig.add_subplot(r,c,i+1)
+                    dst.plt.imshow(dst.cv2.cvtColor(norm(torch.squeeze(y[i])).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+                    dst.plt.axis('off')
+                dst.plt.show()
         
     
 def main():   
     if MODE == 1:
-        train()
+        train(continue_trn=CT)
     elif MODE==2:
         gen_img()
     else:
