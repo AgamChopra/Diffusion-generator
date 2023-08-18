@@ -33,7 +33,7 @@ EPS = 500
 BATCH = 64
 LOSS_TYPE = 'l1'
 CH = DATASET.shape[1]
-T_PRINT = 4
+T_PRINT = 100#4
 
 
 class rand_augment():
