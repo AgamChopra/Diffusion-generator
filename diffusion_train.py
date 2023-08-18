@@ -26,14 +26,14 @@ else:
         input('Height:')), int(input('Width:'))))
 
 T_ENC = 64
-T_DIFF = 100
+T_DIFF = 200
 N_UNET = 1
 LR = 1E-5
 EPS = 500
 BATCH = 64
 LOSS_TYPE = 'l1'
 CH = DATASET.shape[1]
-T_PRINT = 100#4
+T_PRINT = 10
 
 
 class rand_augment():
