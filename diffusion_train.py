@@ -20,20 +20,20 @@ if MODE == 1:
     else:
         print('Incorrect value, using fresh model')
         CT = False
-    DATASET = dst.torch_car_dataset(False, 2)  # torch.zeros((1,3,128,128))#
+    DATASET = dst.torch_car_dataset(True, 1)
 else:
     DATASET = torch.zeros((1, int(input('Channel size:')), int(
         input('Height:')), int(input('Width:'))))
 
 T_ENC = 64
-T_DIFF = 200
+T_DIFF = 100
 N_UNET = 1
-LR = 1E-5
-EPS = 500
-BATCH = 64
+LR = 1E-6
+EPS = 200
+BATCH = 2
 LOSS_TYPE = 'l1'
 CH = DATASET.shape[1]
-T_PRINT = 10
+T_PRINT = 5
 
 
 class rand_augment():
@@ -88,8 +88,7 @@ class noise_generator():
         return apply_random_noise(x0, self.a1, self.a2, self.t_encode)
 
 
-def remove_noise(X_2, noise, a1_1, a2_1, a1_2, a2_2):
-    # X_1 = X_2 - noise * (a1_1 * a2_2 - a1_2 * a2_1)
+def remove_noise(X_2, noise):
     X_1 = (X_2 - noise * (1/T_DIFF)) * (T_DIFF / (T_DIFF - 1))
     return X_1
 
@@ -99,15 +98,16 @@ def diff_train(dataset, lr=1E-2, epochs=5, batch=32, T=1000,
                state=None, loss_type='smoothL1'):
 
     if not load_state:
-        with open('/home/agam/Documents/diffusion_logs/diffuse_training_log.txt', 'w') as file:
-            file.write('lr = %f, epochs = %d, batch = %d, T = %d, time_encoding_dim = %d, loss_type = %s\n' % (
+        with open('T:/Downloads/diff_save/diffuse_training_log.txt', 'w') as f:
+            f.write('lr = %f, epochs = %d, batch = %d, T = %d, time_encoding_dim = %d, loss_type = %s\n' % (
                 lr, epochs, batch, T, time_encoding_dim, loss_type))
-            file.write('Average losses per epoch:\n')
-            file.close()
+            f.write('Average losses per epoch:\n')
+            f.close()
 
     aug = rand_augment()
 
     Glosses = []
+    av_ls_lst = []
 
     print('loading noise generator...')
     noise = noise_generator(T=T, time_encoding_dim=time_encoding_dim)
@@ -130,7 +130,7 @@ def diff_train(dataset, lr=1E-2, epochs=5, batch=32, T=1000,
     if load_state:
         print('loading previous run state...', end=" ")
         Gen.load_state_dict(torch.load(
-            "/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt"))
+            "T:/Downloads/diff_save/Gen-diff-Autosave.pt"))
         print('done.')
 
     if state is not None:
@@ -161,21 +161,22 @@ def diff_train(dataset, lr=1E-2, epochs=5, batch=32, T=1000,
             Glosses.append(errG.item())
 
         if eps % 10 == 0:
-            torch.save(
-                Gen.state_dict(), "/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt")
+            torch.save(Gen.state_dict(),
+                       "T:/Downloads/diff_save/Gen-diff-Autosave.pt")
 
         av_ls = sum(Glosses[-int(len(idx_)/batch):])/int(len(idx_)/batch)
+        av_ls_lst.append(av_ls)
         print('\tAverage Error: %.10f' % (av_ls))
-        with open('/home/agam/Documents/diffusion_logs/diffuse_training_log.txt', 'a') as file:
-            file.writelines(str(av_ls)+'\n')
-            file.close()
+        with open('T:/Downloads/diff_save/diffuse_training_log.txt', 'a') as f:
+            f.writelines(str(av_ls)+'\n')
+            f.close()
 
-        if eps % 20 == 0:
+        if eps % 1 == 0:
             dst.plt.figure(figsize=(10, 5))
-            dst.plt.title("Loss Training")
-            dst.plt.plot(Glosses, label='loss')
+            dst.plt.title("Average Loss Training")
+            dst.plt.plot(av_ls_lst, label='loss')
             dst.plt.legend()
-            dst.plt.xlabel("iterations")
+            dst.plt.xlabel("Epochs")
             dst.plt.ylabel("Loss")
             dst.plt.legend()
             dst.plt.show()
@@ -184,7 +185,8 @@ def diff_train(dataset, lr=1E-2, epochs=5, batch=32, T=1000,
                 a1, a2 = get_alphas(T=T)
                 t_ = int(T / T_PRINT)
                 y = torch.rand(
-                    batch, dataset.shape[1], dataset.shape[2], dataset.shape[3]).cuda()
+                    batch, dataset.shape[1], dataset.shape[2],
+                    dataset.shape[3]).cuda()
                 Gen.eval()
                 dst.plt.figure(figsize=(T, 5))
                 r = 1
@@ -192,35 +194,35 @@ def diff_train(dataset, lr=1E-2, epochs=5, batch=32, T=1000,
                 fig = dst.plt.figure(figsize=(c*6, r*6))
                 fig.add_subplot(r, c, 1)
                 dst.plt.imshow(dst.cv2.cvtColor(
-                    norm(torch.squeeze(y[0])).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+                    norm(torch.squeeze(y[0])).cpu().numpy().T,
+                    dst.cv2.COLOR_BGR2RGB))
                 dst.plt.axis('off')
                 ctr = 2
                 for t in range(T):
                     t_en = noise.t_encode[T-t-1].cuda()
                     psi = Gen(y, t_en)
-                    y = remove_noise(
-                        y, psi, a1[T-t-1].cuda(), a2[T-t-1].cuda(), a1[T-t-2].cuda(), a2[T-t-2].cuda())
+                    y = remove_noise(y, psi)
                     if t % t_ == 0:
                         fig.add_subplot(r, c, ctr)
                         ctr += 1
                         dst.plt.imshow(dst.cv2.cvtColor(
-                            norm(torch.squeeze(y[0])).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+                            norm(torch.squeeze(y[0])).cpu().numpy().T,
+                            dst.cv2.COLOR_BGR2RGB))
                         dst.plt.axis('off')
                 dst.plt.show()
 
     return Gen, Glosses
 
 
-# "E:\ML\Dog-Cat-GANs\Gen_temp.pt"):
-def train(T=T_DIFF, Gsave='/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt', continue_trn=False):
-
+def train(T=T_DIFF, Gsave='T:/Downloads/diff_save/Gen-diff-Autosave.pt',
+          continue_trn=False):
     print('loading data...')
-    # dst.torch_car_dataset(True)#dst.torch_celeb_dataset()#dst.torch_cat_dataset(True)
     dataset = DATASET
     print('done.')
 
     Gen, Gl = diff_train(dataset=dataset, lr=LR, epochs=EPS, batch=BATCH, T=T,
-                         loss_type=LOSS_TYPE, load_state=continue_trn, time_encoding_dim=T_ENC)
+                         loss_type=LOSS_TYPE, load_state=continue_trn,
+                         time_encoding_dim=T_ENC)
 
     torch.save(Gen.state_dict(), Gsave)
 
@@ -243,7 +245,7 @@ def gen_img(T=T_DIFF):
 
         Gen = models.UNet(CH=CH, t_emb=T_ENC, n=N_UNET).cuda()
         Gen.load_state_dict(torch.load(
-            "/home/agam/Documents/diffusion_logs/Gen-diff-Autosave.pt"))
+            "T:/Downloads/diff_save/Gen-diff-Autosave.pt"))
         t_encode = getPositionEncoding(T, T_ENC)
         y = torch.rand(c, CH, DATASET.shape[2], DATASET.shape[3]).cuda()
         Gen.eval()
@@ -255,15 +257,15 @@ def gen_img(T=T_DIFF):
             t_en = t_encode[T-t-1].cuda()
 
             psi = Gen(y, t_en)
-            y = remove_noise(
-                y, psi, a1[T-t-1].cuda(), a2[T-t-1].cuda(), a1[T-t-2].cuda(), a2[T-t-2].cuda())
+            y = remove_noise(y, psi)
 
             if t % t_ == 0:
                 fig = dst.plt.figure(figsize=(15, 8), dpi=250)
                 for i in range(c):
                     fig.add_subplot(r, c, i+1)
                     dst.plt.imshow(dst.cv2.cvtColor(
-                        norm(torch.squeeze(y[i])).cpu().numpy().T, dst.cv2.COLOR_BGR2RGB))
+                        norm(torch.squeeze(y[i])).cpu().numpy().T,
+                        dst.cv2.COLOR_BGR2RGB))
                     dst.plt.axis('off')
                 dst.plt.show()
 

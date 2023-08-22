@@ -73,8 +73,12 @@ class UNet(nn.Module):
 
         self.layer8 = Block(in_c=int(256/n), embd_dim=t_emb, out_c=int(64/n))
 
-        self.out = nn.Conv2d(in_channels=int(
-            64/n), out_channels=CH, kernel_size=1)
+        self.out = nn.Sequential(nn.Conv2d(in_channels=int(64/n),
+                                           out_channels=int(64/n),
+                                           kernel_size=1),
+                                 nn.ReLU(), nn.BatchNorm2d(int(64/n)),
+                                 nn.Conv2d(in_channels=int(64/n),
+                                           out_channels=CH, kernel_size=1))
 
         self.pool2 = nn.Conv2d(in_channels=int(
             128/n), out_channels=int(128/n), kernel_size=2, stride=2)
@@ -118,10 +122,10 @@ class UNet(nn.Module):
 
 def test(device='cpu'):
     batch = 1
-    a = torch.ones((batch, 3, 64, 64), device=device)
+    a = torch.ones((batch, 1, 64, 64), device=device)
     t = torch.ones((batch, 32), device=device)
 
-    model = UNet(n=0.125).to(device)
+    model = UNet(CH=1, n=64).to(device)
     print(model)
 
     b = model(a, t, device)
