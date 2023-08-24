@@ -144,7 +144,7 @@ class Block(nn.Module):
             self.mlp = nn.Sequential(nn.Linear(embd_dim, out_c), nn.ReLU())
 
             self.layer = nn.Sequential(nn.Conv2d(
-                in_channels=in_c, out_channels=out_c, kernel_size=2),
+                in_channels=in_c, out_channels=out_c, kernel_size=3),
                 nn.ReLU(), nn.BatchNorm2d(out_c))
 
             self.out_block = nn.Sequential(nn.Conv2d(
@@ -154,17 +154,16 @@ class Block(nn.Module):
             self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.ReLU())
 
             self.layer = nn.Sequential(nn.Conv2d(
-                in_channels=in_c, out_channels=hid_c, kernel_size=2),
+                in_channels=in_c, out_channels=hid_c, kernel_size=3),
                 nn.ReLU(), nn.BatchNorm2d(hid_c))
 
             self.out_block = nn.Sequential(nn.Conv2d(in_channels=hid_c,
                                                      out_channels=hid_c,
-                                                     kernel_size=2),
-                                           nn.ReLU(), nn.BatchNorm2d(hid_c),
+                                                     kernel_size=2), nn.ReLU(),
+                                           nn.BatchNorm2d(hid_c),
                                            nn.ConvTranspose2d(in_channels=hid_c,
                                                               out_channels=out_c,
-                                                              kernel_size=2,
-                                                              stride=2),
+                                                              kernel_size=4, stride=4),
                                            nn.ReLU(), nn.BatchNorm2d(out_c))
 
     def forward(self, x, t):
@@ -183,7 +182,7 @@ class UNet(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(t_emb, t_emb), nn.ReLU())
 
         self.layer1 = nn.Sequential(
-            nn.Conv2d(CH, int(64/n), 2, 1), nn.ReLU(),
+            nn.Conv2d(CH, int(64/n), 3, 1), nn.ReLU(),
             nn.BatchNorm2d(int(64/n)))
 
         self.layer2 = Block(in_c=int(64/n), embd_dim=t_emb, out_c=int(128/n))
@@ -195,7 +194,7 @@ class UNet(nn.Module):
 
         self.out = nn.Sequential(nn.Conv2d(in_channels=int(64/n),
                                            out_channels=int(64/n),
-                                           kernel_size=1),
+                                           kernel_size=2),
                                  nn.ReLU(), nn.BatchNorm2d(int(64/n)),
                                  nn.Conv2d(in_channels=int(64/n),
                                            out_channels=CH, kernel_size=1))
@@ -215,13 +214,12 @@ class UNet(nn.Module):
 
         y = self.layer3(y, t)
 
-        y = torch.cat((y2, pad2d(y, y2)), dim=1)
+        y = torch.cat((y, pad2d(y2, y)), dim=1)
         y = self.layer4(y, t)
-
-        y = pad2d(y, x)
 
         y = self.out(y)
 
+        # y = pad2d(y, x)
         return y
 
 
@@ -379,13 +377,13 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1,
 
 
 # %% TRAIN
-train(path='/home/ringarty/Documents/', epochs=2000,
-      lr=1E-7, batch_size=128, steps=1000, n=1, device='cuda')
+train(path='/home/agam/Documents/', epochs=2000,
+      lr=1E-5, batch_size=128, steps=500, n=0.25, device='cuda')
 
 # %% FIN
 diffusion = Diffusion(steps=1000)
 
-path = '/home/ringarty/Documents/'
+path = '/home/agam/Documents/'
 model = UNet(n=1)
 model.load_state_dict(torch.load(os.path.join(path,
                                               "diffusion-MNIST-Autosave.pt")))
@@ -394,7 +392,7 @@ x = torch.randn((1, 1, 28, 28))
 
 for t in range(0, 1000):
     x = diffusion.backward(x, torch.tensor(999 - t), model)
-    if t % 25 == 0 or t == 999:
+    if t % 10 == 0 or t == 999:
         plt.imshow(x[0, 0], cmap='gray_r')
         plt.axis('off')
         plt.title(f'Denoising Step: {t}')
