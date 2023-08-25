@@ -17,13 +17,13 @@ import os
 
 
 def show_images(data, num_samples=9, cols=3):
-    plt.figure(figsize=(5, 5))
+    plt.figure(figsize=(15, 15))
     for i, img in enumerate(data):
         if i == num_samples:
             break
         plt.subplot(int(num_samples/cols) + 1, cols, i + 1)
         plt.axis('off')
-        plt.imshow(img[0], cmap='gray_r')
+        plt.imshow(img[0], cmap='magma')
     plt.show()
 
 
@@ -52,7 +52,7 @@ def forward_sample(x0, t, steps, start=0., end=1.):
     alpha_hat = torch.cumprod(alphas, dim=0)
     alpha_hat_t = torch.gather(alpha_hat, dim=-1,
                                index=t.to(x0.device)).view(-1, 1, 1, 1)
-    noise = (torch.randn_like(x0) - 0.5).to(x0.device)
+    noise = torch.randn_like(x0).to(x0.device)
     mean = alpha_hat_t.sqrt() * x0
     var = torch.sqrt(1 - alpha_hat_t) * noise
     xt = mean + var
@@ -103,7 +103,7 @@ print(embds_t.shape)
 # %% HELPER FUNCTIONS
 
 
-def pad2d(input_, target):
+def pad2d(input_, target):  # pads if target is bigger and crops if target is smaller
     delta = [target.shape[2+i] - input_.shape[2+i] for i in range(2)]
     output = nn.functional.pad(input=input_,
                                pad=(ceil(delta[1]/2),
@@ -144,27 +144,18 @@ class Block(nn.Module):
             self.mlp = nn.Sequential(nn.Linear(embd_dim, out_c), nn.ReLU())
 
             self.layer = nn.Sequential(nn.Conv2d(
-                in_channels=in_c, out_channels=out_c, kernel_size=3),
-                nn.ReLU(), nn.BatchNorm2d(out_c))
+                in_channels=in_c, out_channels=out_c, kernel_size=3), nn.ReLU(), nn.BatchNorm2d(out_c))
 
             self.out_block = nn.Sequential(nn.Conv2d(
-                in_channels=out_c, out_channels=out_c, kernel_size=2),
-                nn.ReLU(), nn.BatchNorm2d(out_c))
+                in_channels=out_c, out_channels=out_c, kernel_size=2), nn.ReLU(), nn.BatchNorm2d(out_c))
         else:
             self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.ReLU())
 
             self.layer = nn.Sequential(nn.Conv2d(
-                in_channels=in_c, out_channels=hid_c, kernel_size=3),
-                nn.ReLU(), nn.BatchNorm2d(hid_c))
+                in_channels=in_c, out_channels=hid_c, kernel_size=3), nn.ReLU(), nn.BatchNorm2d(hid_c))
 
-            self.out_block = nn.Sequential(nn.Conv2d(in_channels=hid_c,
-                                                     out_channels=hid_c,
-                                                     kernel_size=2), nn.ReLU(),
-                                           nn.BatchNorm2d(hid_c),
-                                           nn.ConvTranspose2d(in_channels=hid_c,
-                                                              out_channels=out_c,
-                                                              kernel_size=4, stride=4),
-                                           nn.ReLU(), nn.BatchNorm2d(out_c))
+            self.out_block = nn.Sequential(nn.Conv2d(in_channels=hid_c, out_channels=hid_c, kernel_size=2), nn.ReLU(), nn.BatchNorm2d(hid_c),
+                                           nn.ConvTranspose2d(in_channels=hid_c, out_channels=out_c, kernel_size=2, stride=2), nn.ReLU(), nn.BatchNorm2d(out_c))
 
     def forward(self, x, t):
         t = self.mlp(t)
@@ -182,19 +173,28 @@ class UNet(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(t_emb, t_emb), nn.ReLU())
 
         self.layer1 = nn.Sequential(
-            nn.Conv2d(CH, int(64/n), 3, 1), nn.ReLU(),
-            nn.BatchNorm2d(int(64/n)))
+            nn.Conv2d(CH, int(64/n), 2, 1), nn.ReLU(), nn.BatchNorm2d(int(64/n)))
 
         self.layer2 = Block(in_c=int(64/n), embd_dim=t_emb, out_c=int(128/n))
 
-        self.layer3 = Block(in_c=int(128/n), embd_dim=t_emb,
+        self.layer3 = Block(in_c=int(128/n), embd_dim=t_emb, out_c=int(256/n))
+
+        self.layer4 = Block(in_c=int(256/n), embd_dim=t_emb, out_c=int(512/n))
+
+        self.layer5 = Block(in_c=int(512/n), embd_dim=t_emb,
+                            out_c=int(512/n), hid_c=int(1024/n))
+
+        self.layer6 = Block(in_c=int(1024/n), embd_dim=t_emb,
+                            out_c=int(256/n), hid_c=int(512/n))
+
+        self.layer7 = Block(in_c=int(512/n), embd_dim=t_emb,
                             out_c=int(128/n), hid_c=int(256/n))
 
-        self.layer4 = Block(in_c=int(256/n), embd_dim=t_emb, out_c=int(64/n))
+        self.layer8 = Block(in_c=int(256/n), embd_dim=t_emb, out_c=int(64/n))
 
         self.out = nn.Sequential(nn.Conv2d(in_channels=int(64/n),
                                            out_channels=int(64/n),
-                                           kernel_size=2),
+                                           kernel_size=1),
                                  nn.ReLU(), nn.BatchNorm2d(int(64/n)),
                                  nn.Conv2d(in_channels=int(64/n),
                                            out_channels=CH, kernel_size=1))
@@ -202,24 +202,41 @@ class UNet(nn.Module):
         self.pool2 = nn.Conv2d(in_channels=int(
             128/n), out_channels=int(128/n), kernel_size=2, stride=2)
 
-    def forward(self, x, t):
-        if len(t.shape) < 2:
-            t = t.view(1, EMBD_DIM)
+        self.pool3 = nn.Conv2d(in_channels=int(
+            256/n), out_channels=int(256/n), kernel_size=2, stride=2)
 
+        self.pool4 = nn.Conv2d(in_channels=int(
+            512/n), out_channels=int(512/n), kernel_size=2, stride=2)
+
+    def forward(self, x, t):
         t = self.time_mlp(t)
-        y = self.layer1(x)
+        x_padded = pad2d(x, torch.ones((1, 1, 65, 65)))
+        y = self.layer1(x_padded)
 
         y2 = self.layer2(y, t)
         y = self.pool2(y2)
 
-        y = self.layer3(y, t)
+        y3 = self.layer3(y, t)
+        y = self.pool3(y3)
 
-        y = torch.cat((y, pad2d(y2, y)), dim=1)
-        y = self.layer4(y, t)
+        y4 = self.layer4(y, t)
+        y = self.pool4(y4)
+
+        y = self.layer5(y, t)
+
+        y = torch.cat((y4, pad2d(y, y4)), dim=1)
+        y = self.layer6(y, t)
+
+        y = torch.cat((y3, pad2d(y, y3)), dim=1)
+        y = self.layer7(y, t)
+
+        y = torch.cat((y2, pad2d(y, y2)), dim=1)
+        y = self.layer8(y, t)
+
+        y = pad2d(y, x)
 
         y = self.out(y)
 
-        # y = pad2d(y, x)
         return y
 
 
@@ -247,7 +264,7 @@ class Diffusion:
         self.embeddings = getPositionEncoding(steps, d=EMBD_DIM, n=10000)
 
     def forward(self, x0, t):
-        noise = torch.randn_like(x0) - 0.5
+        noise = torch.randn_like(x0)
         alpha_hat_t = torch.gather(self.alpha_hat, dim=-1,
                                    index=t).view(-1, 1, 1, 1)
         mean = alpha_hat_t.sqrt() * x0
@@ -334,6 +351,11 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1,
           err_func=nn.L1Loss(), device='cpu'):
     data = Dataloader(batch_size=batch_size)
     model = UNet(CH=data.data.shape[1], n=n).to(device)
+    try:
+        model.load_state_dict(torch.load(os.path.join(path,
+                                                      "diffusion-MNIST-Autosave.pt")))
+    except Exception:
+        print('paramerts failed to load from last run')
     optimizer = torch.optim.Adam(model.parameters(), lr)
     train_error = []
     avg_fact = ceil(len(data.data) / batch_size)
@@ -377,23 +399,33 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1,
 
 
 # %% TRAIN
-train(path='/home/agam/Documents/', epochs=2000,
-      lr=1E-5, batch_size=128, steps=500, n=0.25, device='cuda')
+train(path='/home/ringarty/Documents/', epochs=2000,
+      lr=1E-4, batch_size=256, steps=1000, n=8, device='cuda')
 
 # %% FIN
 diffusion = Diffusion(steps=1000)
 
-path = '/home/agam/Documents/'
-model = UNet(n=1)
+path = '/home/ringarty/Documents/'
+model = UNet(n=8)
 model.load_state_dict(torch.load(os.path.join(path,
-                                              "diffusion-MNIST-Autosave.pt")))
+                                              "diffusion-MNIST-Autosave.pt"),
+                                 map_location=torch.device('cpu')))
+
 
 x = torch.randn((1, 1, 28, 28))
+print(x.mean(), x.min(), x.max())
+idx = torch.linspace(0, 999, 16, dtype=torch.int)
+imgs = []
 
 for t in range(0, 1000):
-    x = diffusion.backward(x, torch.tensor(999 - t), model)
-    if t % 10 == 0 or t == 999:
-        plt.imshow(x[0, 0], cmap='gray_r')
+    x = torch.clamp(diffusion.backward(x, torch.tensor(999 - t), model), -1, 1)
+    if t % 50 == 0 or t == 999:
+        print(x.mean(), x.min(), x.max())
+        plt.imshow(x[0, 0], cmap='magma')
         plt.axis('off')
         plt.title(f'Denoising Step: {t}')
         plt.show()
+    if t in idx:
+        imgs.append(x)
+imgs = torch.cat(imgs, dim=0)
+show_images(imgs, 16, 4)
