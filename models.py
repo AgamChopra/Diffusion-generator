@@ -91,7 +91,12 @@ class UNet(nn.Module):
     def forward(self, x, t):
         t = self.time_mlp(t)
 
-        x_pad = pad2d(x, torch.ones((1, 1, 65, 65))) if x.shape[2] < 65 else x
+        if x.shape[2] < 64:
+            x_pad = pad2d(x, torch.ones((1, 1, 65, 65)))
+        elif x.shape[2] < 71:
+            x_pad = pad2d(x, torch.ones((1, 1, 71, 71)))
+        else:
+            x_pad = x
 
         y = self.layer1(x_pad)
 
@@ -125,12 +130,11 @@ class UNet(nn.Module):
 def test(device='cpu'):
     batch = 1
     a = torch.ones((batch, 1, 64, 64), device=device)
-    t = torch.ones((batch, 32), device=device)
+    t = torch.ones((batch, 64), device=device)
 
     model = UNet(CH=1, n=64).to(device)
-    print(model)
 
-    b = model(a, t, device)
+    b = model(a, t)
 
     print(a.shape, t.shape)
     print(b.shape)
