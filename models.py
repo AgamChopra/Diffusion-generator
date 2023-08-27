@@ -1,20 +1,19 @@
 import torch
 import torch.nn as nn
+from math import ceil
 
 
-def pad2d(input_, target, device='cpu'):
-    output_ = torch.zeros(
-        (target.shape[0], input_.shape[1], target.shape[2], target.shape[3]), device=device)
-    start_idx = int((output_.shape[-1] - input_.shape[-1]) / 2)
-    try:
-        output_[:, :, start_idx:-start_idx, start_idx:-start_idx] = input_
-    except:
-        try:
-            output_[:, :, start_idx:-start_idx-1,
-                    start_idx:-start_idx-1] = input_
-        except:
-            output_[:, :, 1:, 1:] = input_
-    return output_
+def pad2d(input_, target):  # pads if target is bigger and crops if target is smaller
+    delta = [target.shape[2+i] - input_.shape[2+i] for i in range(2)]
+    output = nn.functional.pad(input=input_,
+                               pad=(ceil(delta[1]/2),
+                                    delta[1] - ceil(delta[1]/2),
+                                    ceil(delta[0]/2),
+                                    delta[0] - ceil(delta[0]/2)),
+                               mode='constant',
+                               value=0).to(dtype=torch.float,
+                                           device=input_.device)
+    return output
 
 
 class Block(nn.Module):
@@ -48,30 +47,30 @@ class Block(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, CH=3, t_emb=32, n=1):
+    def __init__(self, CH=1, emb=64, n=1):
         super(UNet, self).__init__()
         # layers
-        self.time_mlp = nn.Sequential(nn.Linear(t_emb, t_emb), nn.ReLU())
+        self.time_mlp = nn.Sequential(nn.Linear(emb, emb), nn.ReLU())
 
         self.layer1 = nn.Sequential(
             nn.Conv2d(CH, int(64/n), 2, 1), nn.ReLU(), nn.BatchNorm2d(int(64/n)))
 
-        self.layer2 = Block(in_c=int(64/n), embd_dim=t_emb, out_c=int(128/n))
+        self.layer2 = Block(in_c=int(64/n), embd_dim=emb, out_c=int(128/n))
 
-        self.layer3 = Block(in_c=int(128/n), embd_dim=t_emb, out_c=int(256/n))
+        self.layer3 = Block(in_c=int(128/n), embd_dim=emb, out_c=int(256/n))
 
-        self.layer4 = Block(in_c=int(256/n), embd_dim=t_emb, out_c=int(512/n))
+        self.layer4 = Block(in_c=int(256/n), embd_dim=emb, out_c=int(512/n))
 
-        self.layer5 = Block(in_c=int(512/n), embd_dim=t_emb,
+        self.layer5 = Block(in_c=int(512/n), embd_dim=emb,
                             out_c=int(512/n), hid_c=int(1024/n))
 
-        self.layer6 = Block(in_c=int(1024/n), embd_dim=t_emb,
+        self.layer6 = Block(in_c=int(1024/n), embd_dim=emb,
                             out_c=int(256/n), hid_c=int(512/n))
 
-        self.layer7 = Block(in_c=int(512/n), embd_dim=t_emb,
+        self.layer7 = Block(in_c=int(512/n), embd_dim=emb,
                             out_c=int(128/n), hid_c=int(256/n))
 
-        self.layer8 = Block(in_c=int(256/n), embd_dim=t_emb, out_c=int(64/n))
+        self.layer8 = Block(in_c=int(256/n), embd_dim=emb, out_c=int(64/n))
 
         self.out = nn.Sequential(nn.Conv2d(in_channels=int(64/n),
                                            out_channels=int(64/n),
@@ -89,9 +88,12 @@ class UNet(nn.Module):
         self.pool4 = nn.Conv2d(in_channels=int(
             512/n), out_channels=int(512/n), kernel_size=2, stride=2)
 
-    def forward(self, x, t, device='cuda:0'):
+    def forward(self, x, t):
         t = self.time_mlp(t)
-        y = self.layer1(x)
+
+        x_pad = pad2d(x, torch.ones((1, 1, 65, 65))) if x.shape[2] < 65 else x
+
+        y = self.layer1(x_pad)
 
         y2 = self.layer2(y, t)
         y = self.pool2(y2)
@@ -104,16 +106,16 @@ class UNet(nn.Module):
 
         y = self.layer5(y, t)
 
-        y = torch.cat((y4, pad2d(y, y4, device=device)), dim=1)
+        y = torch.cat((y4, pad2d(y, y4)), dim=1)
         y = self.layer6(y, t)
 
-        y = torch.cat((y3, pad2d(y, y3, device=device)), dim=1)
+        y = torch.cat((y3, pad2d(y, y3)), dim=1)
         y = self.layer7(y, t)
 
-        y = torch.cat((y2, pad2d(y, y2, device=device)), dim=1)
+        y = torch.cat((y2, pad2d(y, y2)), dim=1)
         y = self.layer8(y, t)
 
-        y = pad2d(y, x, device=device)
+        y = pad2d(y, x)
 
         y = self.out(y)
 
@@ -144,25 +146,3 @@ def test(device='cpu'):
 
 if __name__ == '__main__':
     test('cuda:0')
-
-'''
-import torch
-from matplotlib import pyplot as plt
-
-def getPositionEncoding(seq_len, d=512, n=10000):
-    P = torch.zeros((seq_len, d))
-    for k in range(seq_len):
-        for i in torch.arange(int(d/2)):
-            denominator = torch.pow(n, 2*i/d)
-            P[k, 2*i] = torch.sin(k/denominator)
-            P[k, 2*i+1] = torch.cos(k/denominator)
-    return P
-
-
-p = getPositionEncoding(200,256)
-
-print(p.shape)
-
-plt.imshow(p.cpu().numpy(),cmap='jet')
-plt.show()
-'''
