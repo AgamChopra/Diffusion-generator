@@ -30,7 +30,7 @@ def fetch_data(image_size=64):
 
 
 class Loader:
-    def __init__(self, batch_size=64, img_size=64, num_workers=4):
+    def __init__(self, batch_size=64, img_size=64, num_workers=16):
         dataset = fetch_data(img_size)
         self.data_loader = DataLoader(
             dataset=dataset, batch_size=batch_size, shuffle=True,
@@ -40,14 +40,14 @@ class Loader:
 
 def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
           err_func=nn.L1Loss(), device='cpu'):
-    data = Loader()
+    data = Loader(batch_size=batch_size)
     model = UNet(CH=3, emb=emb, n=n).to(device)
     try:
         model.load_state_dict(torch.load(os.path.join(path,
                                                       "CELEB-Autosave.pt")))
     except Exception:
         print('paramerts failed to load from last run')
-    optimizer = torch.optim.Adam(model.parameters(), lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr)
     train_error = []
     avg_fact = data.iters
     tpop = range(1, steps)
@@ -96,7 +96,7 @@ def fin(iterations=100):
     diffusion = Diffusion(steps=1000)
 
     path = 'T:/github/Diffusion-generator/parameters/'
-    model = UNet(CH=3, emb=64, n=8).cuda()
+    model = UNet(CH=3, emb=64, n=1).cuda()
     model.load_state_dict(torch.load(os.path.join(path,
                                                   "CELEB-Autosave.pt")))
 
@@ -117,7 +117,8 @@ def fin(iterations=100):
 if __name__ == '__main__':
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
-        train(path='T:/github/Diffusion-generator/parameters/', epochs=100,
-              lr=1E-3, batch_size=64, steps=1000, n=8, emb=64, device='cuda')
+        train(path='T:/github/Diffusion-generator/parameters/', epochs=2000,
+              err_func=nn.HuberLoss(delta=0.06), lr=1E-4, batch_size=32,
+              steps=1000, n=1, emb=64, device='cuda')
     else:
         fin()

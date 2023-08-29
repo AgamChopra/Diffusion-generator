@@ -59,7 +59,7 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
                                                       "diffusion-MNIST-Autosave.pt")))
     except Exception:
         print('paramerts failed to load from last run')
-    optimizer = torch.optim.Adam(model.parameters(), lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr)
     train_error = []
     avg_fact = ceil(len(data.data) / batch_size)
     tpop = range(1, steps)
