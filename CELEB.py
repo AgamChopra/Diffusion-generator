@@ -10,12 +10,13 @@ import torch
 import torchvision
 import torch.nn as nn
 import matplotlib.pyplot as plt
-from tqdm import tqdm
+from tqdm import tqdm, trange
 from torchvision import transforms
 from torch.utils.data import DataLoader
 
 from models import UNet
 from helper import show_images, getPositionEncoding, forward_sample, Diffusion
+from helper import distributions
 
 
 def fetch_data(image_size=64):
@@ -30,7 +31,7 @@ def fetch_data(image_size=64):
 
 
 class Loader:
-    def __init__(self, batch_size=64, img_size=64, num_workers=16):
+    def __init__(self, batch_size=64, img_size=64, num_workers=2):
         dataset = fetch_data(img_size)
         self.data_loader = DataLoader(
             dataset=dataset, batch_size=batch_size, shuffle=True,
@@ -95,30 +96,40 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
 def fin(iterations=100):
     diffusion = Diffusion(steps=1000)
 
-    path = 'T:/github/Diffusion-generator/parameters/'
+    path = 'T:/github/parameters/'
     model = UNet(CH=3, emb=64, n=1).cuda()
     model.load_state_dict(torch.load(os.path.join(path,
                                                   "CELEB-Autosave.pt")))
+    idx = torch.linspace(0, 999, 16, dtype=torch.int).cuda()
+    print(idx)
 
-    for _ in range(100):
-        x = torch.randn((1, 3, 64, 64)).cuda()
-        idx = torch.linspace(0, 999, 16, dtype=torch.int).cuda()
-        imgs = []
+    x = torch.randn((iterations, 3, 64, 64)).cuda()
+    imgs = []
 
-        for t in range(0, 1000):
-            x = torch.clamp(diffusion.backward(
-                x, torch.tensor(999 - t), model), 0, 1)
-            if t in idx:
-                imgs.append(x)
-        imgs = torch.cat(imgs, dim=0)
-        show_images(imgs.cpu(), 16, 4)
+    for t in trange(0, 1000):
+        x = torch.clamp(diffusion.backward(
+            x, torch.tensor(999 - t), model), 0, 1)
+        if t in idx:
+            imgs.append(x[0:1])
+
+    imgs = torch.cat(imgs, dim=0)
+    print(imgs.shape)
+    show_images(imgs.cpu(), 16, 4)
+    show_images(x.cpu(), iterations, int(iterations ** 0.5))
+    return x.cpu()
 
 
 if __name__ == '__main__':
+    itr = 9
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
-        train(path='T:/github/Diffusion-generator/parameters/', epochs=2000,
+        train(path='T:/parameters/', epochs=2000,
               err_func=nn.HuberLoss(delta=0.06), lr=1E-4, batch_size=32,
               steps=1000, n=1, emb=64, device='cuda')
     else:
-        fin()
+        y = fin(iterations=itr)
+        data = Loader(batch_size=itr)
+        for x in data.data_loader:
+            x = x[0]
+            break
+        distributions(x, y)

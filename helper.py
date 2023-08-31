@@ -21,6 +21,28 @@ def show_images(data, num_samples=9, cols=3):
     plt.show()
 
 
+def distributions(x, y):
+    plt.figure(figsize=(10, 5), dpi=500)
+
+    idx = torch.linspace(-3, 3, 300)
+    noise = torch.randn((x.shape))
+
+    d0 = torch.histc(noise, bins=300, min=-3, max=3)
+    d1 = torch.histc(x, bins=300, min=-3, max=3)
+    d2 = torch.histc(y, bins=300, min=-3, max=3)
+
+    d0 /= d0.max()
+    d1 /= d1.max()
+    d2 /= d2.max()
+
+    plt.plot(idx, d0, 'k-', label='Noise')
+    plt.plot(idx, d1, 'm-', label='Target')
+    plt.plot(idx, d2, 'r-', label='Predicted')
+    plt.legend()
+    plt.title(f'n = {x.shape[0]}')
+    plt.show()
+
+
 def getPositionEncoding(seq_len, d=64, n=10000):
     P = torch.zeros((seq_len, d))
     for k in range(seq_len):
