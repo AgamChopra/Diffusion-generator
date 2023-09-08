@@ -130,9 +130,10 @@ if __name__ == '__main__':
               steps=1000, n=1, emb=64, device='cuda')
     else:
         y = fin(iterations=itr)
-        data = Loader(batch_size=itr)
-        for x in data.data_loader:
-            x0 = x[0]
-            x = (((x0 - x0.min()) / (x0.max() - x0.min())) - 0.5) * 6
-            break
-        distributions(x, y)
+        if True:
+            data = Loader(batch_size=itr)
+            for x in data.data_loader:
+                x0 = x[0]
+                x = (((x0 - x0.min()) / (x0.max() - x0.min())) - 0.5) * 6
+                break
+            distributions(x, y)
