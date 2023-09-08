@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 
 
 def show_images(data, num_samples=9, cols=3):
+    data = (data - data.min()) / (data.max() - data.min())
     plt.figure(figsize=(15, 15))
     for i, img in enumerate(data):
         if i == num_samples:

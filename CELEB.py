@@ -21,7 +21,8 @@ from helper import distributions
 
 def fetch_data(image_size=64):
     dataset = torchvision.datasets.CelebA(
-        root='./data', split='all', transform=transforms.Compose([
+        root='E:/pytorch_datasets/data', split='all',
+        transform=transforms.Compose([
             transforms.Resize(image_size),
             transforms.CenterCrop(image_size),
             transforms.ToTensor()
@@ -31,7 +32,7 @@ def fetch_data(image_size=64):
 
 
 class Loader:
-    def __init__(self, batch_size=64, img_size=64, num_workers=2):
+    def __init__(self, batch_size=64, img_size=64, num_workers=8):
         dataset = fetch_data(img_size)
         self.data_loader = DataLoader(
             dataset=dataset, batch_size=batch_size, shuffle=True,
@@ -62,6 +63,7 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
         for itr, x in enumerate(tqdm(data.data_loader)):
             optimizer.zero_grad()
             x0 = x[0].to(device)
+            x0 = (((x0 - x0.min()) / (x0.max() - x0.min())) - 0.5) * 6
             t = torch.tensor(random.sample(tpop, len(x0)), device=device)
             xt, noise = forward_sample(x0, t, steps, 0.0001, 0.02)
             embdt = embds[t]
@@ -96,7 +98,7 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
 def fin(iterations=100):
     diffusion = Diffusion(steps=1000)
 
-    path = 'T:/github/parameters/'
+    path = 'R:/git projects/parameters/'
     model = UNet(CH=3, emb=64, n=1).cuda()
     model.load_state_dict(torch.load(os.path.join(path,
                                                   "CELEB-Autosave.pt")))
@@ -108,7 +110,7 @@ def fin(iterations=100):
 
     for t in trange(0, 1000):
         x = torch.clamp(diffusion.backward(
-            x, torch.tensor(999 - t), model), 0, 1)
+            x, torch.tensor(999 - t), model), -3, 3)
         if t in idx:
             imgs.append(x[0:1])
 
@@ -120,16 +122,17 @@ def fin(iterations=100):
 
 
 if __name__ == '__main__':
-    itr = 9
+    itr = 64
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
-        train(path='T:/parameters/', epochs=2000,
+        train(path='R:/git projects/parameters/', epochs=2000,
               err_func=nn.HuberLoss(delta=0.06), lr=1E-4, batch_size=32,
               steps=1000, n=1, emb=64, device='cuda')
     else:
         y = fin(iterations=itr)
         data = Loader(batch_size=itr)
         for x in data.data_loader:
-            x = x[0]
+            x0 = x[0]
+            x = (((x0 - x0.min()) / (x0.max() - x0.min())) - 0.5) * 6
             break
         distributions(x, y)

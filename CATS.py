@@ -39,6 +39,7 @@ def fetch_data():
     data = cat_dataset()
     data = torch.from_numpy(data).to(dtype=torch.float)
     data = (data - data.min()) / (data.max() - data.min())
+    data = (data - 0.5) * 6
     return data
 
 
@@ -105,11 +106,14 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
                        os.path.join(path, "CATS-Autosave.pt"))
 
 
+STEPS = 1000
+
+
 def fin(iterations=100):
-    diffusion = Diffusion(steps=1000)
+    diffusion = Diffusion(steps=STEPS)
 
     path = 'R:/git projects/parameters/'
-    model = UNet(CH=3, emb=64, n=0.5).cuda()
+    model = UNet(CH=3, emb=64, n=1).cuda()
     model.load_state_dict(torch.load(os.path.join(path,
                                                   "CATS-Autosave.pt")))
     idx = torch.linspace(0, 999, 16, dtype=torch.int).cuda()
@@ -118,9 +122,9 @@ def fin(iterations=100):
     x = torch.randn((iterations, 3, 64, 64)).cuda()
     imgs = []
 
-    for t in trange(0, 1000):
+    for t in trange(0, STEPS):
         x = torch.clamp(diffusion.backward(
-            x, torch.tensor(999 - t), model), 0, 1)
+            x, torch.tensor(STEPS - 1 - t), model), -3, 3)
         if t in idx:
             imgs.append(x[0:1])
 
@@ -131,12 +135,12 @@ def fin(iterations=100):
 
 
 if __name__ == '__main__':
-    itr = 64
+    itr = 16
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
         train(path='R:/git projects/parameters/', epochs=2000,
-              err_func=nn.HuberLoss(delta=0.01), lr=1E-4, batch_size=64,
-              steps=1000, n=0.5, emb=64, device='cuda')
+              err_func=nn.HuberLoss(delta=1E-3), lr=1E-5, batch_size=64,
+              steps=STEPS, n=1, emb=64, device='cuda')
     else:
         y = fin(iterations=itr)
         data = Loader(batch_size=itr)
