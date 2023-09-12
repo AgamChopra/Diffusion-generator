@@ -7,9 +7,9 @@ import torch
 import matplotlib.pyplot as plt
 
 
-def show_images(data, num_samples=9, cols=3):
+def show_images(data, num_samples=9, cols=3, mode=True):
     data = (data - data.min()) / (data.max() - data.min())
-    plt.figure(figsize=(15, 15))
+    plt.figure(figsize=(15, 15), dpi=500)
     for i, img in enumerate(data):
         if i == num_samples:
             break
@@ -18,7 +18,10 @@ def show_images(data, num_samples=9, cols=3):
         if img.shape[0] == 1:
             plt.imshow(img[0], cmap='magma')
         else:
-            plt.imshow(img.permute(1, 2, 0))
+            if mode:
+                plt.imshow(img.permute(1, 2, 0))
+            else:
+                plt.imshow(img.permute(2, 1, 0))
     plt.show()
 
 
