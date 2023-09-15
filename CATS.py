@@ -20,7 +20,7 @@ from helper import distributions
 
 
 def get_cats_avg():
-    img = cv2.imread('E:/target.jpg',)
+    img = cv2.imread('R:/E/target.jpg',)
     x = cv2.resize(img, dsize=(512, 512), interpolation=cv2.INTER_CUBIC).T
     img = np.asarray([x[2], x[1], x[0]]).astype(dtype=np.float32)
     # img = 0.2126 * img[0] + 0.7152 * img[1] + 0.0722 * img[2]
@@ -33,7 +33,7 @@ def load_cats():
     cat_list = []
     for i in trange(5653):
         img = cv2.imread(
-            'E:/ML/Dog-Cat-GANs/Dataset/cat_hq/cat (%d).jpg' % (i+1))
+            'R:/E/ML/Dog-Cat-GANs/Dataset/cat_hq/cat (%d).jpg' % (i+1))
         x = cv2.resize(img, dsize=(512, 512),
                        interpolation=cv2.INTER_CUBIC).T
         cat_list.append([x[2], x[1], x[0]])
@@ -123,7 +123,7 @@ STEPS = 1000
 def fin(iterations=100, alpha=0.5):
     diffusion = Diffusion(steps=STEPS)
     x1 = torch.from_numpy(get_cats_avg()).to(dtype=torch.float, device='cuda')
-    path = 'E:/parameters/'
+    path = 'R:/E/parameters/'
     model = UNet(CH=3, emb=64, n=0.5).cuda()
     try:
         model.load_state_dict(torch.load(os.path.join(path,
@@ -153,7 +153,7 @@ if __name__ == '__main__':
     itr = 4
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
-        train(path='E:/parameters/', epochs=1000,
+        train(path='R:/E/parameters/', epochs=1000,
               err_func=nn.HuberLoss(delta=1E-6), lr=1E-3, batch_size=2,
               steps=STEPS, n=0.5, emb=64, device='cuda')
     else:

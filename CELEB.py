@@ -21,7 +21,7 @@ from helper import distributions
 
 def fetch_data(image_size=64):
     dataset = torchvision.datasets.CelebA(
-        root='E:/pytorch_datasets/data', split='all',
+        root='R:/E/pytorch_datasets/data', split='all',
         transform=transforms.Compose([
             transforms.Resize(image_size),
             transforms.CenterCrop(image_size),
