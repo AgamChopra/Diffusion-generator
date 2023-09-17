@@ -135,7 +135,7 @@ def fin(iterations=100, alpha=0.5):
     imgs = []
     x = torch.cat([torch.clamp(forward_sample(x1, torch.tensor(
         [STEPS - int(STEPS*alpha)], device='cuda'), STEPS, 0.0001,
-        0.02)[0], -3, 3) for _ in trange(iterations)], dim=0)
+        0.02)[0], -3, 3) for _ in range(iterations)], dim=0)
 
     for t in trange(int(STEPS*alpha), STEPS):
         x = torch.clamp(diffusion.backward(

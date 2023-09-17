@@ -7,9 +7,9 @@ import torch
 import matplotlib.pyplot as plt
 
 
-def show_images(data, num_samples=9, cols=3, mode=True):
+def show_images(data, num_samples=9, cols=3, mode=True, size=(5, 5), dpi=150):
     data = (data - data.min()) / (data.max() - data.min())
-    plt.figure(figsize=(15, 15), dpi=500)
+    plt.figure(figsize=size, dpi=dpi)
     for i, img in enumerate(data):
         if i == num_samples:
             break
@@ -57,13 +57,22 @@ def getPositionEncoding(seq_len, d=64, n=10000):
     return P
 
 
-def forward_sample(x0, t, steps, start=0., end=1.):
-    betas = torch.linspace(start, end, steps).to(x0.device)
+def beta_cos(steps, start, end):
+    x = torch.linspace(start, 1., steps, dtype=torch.float)
+    beta = end * (1 - torch.cos(x * torch.pi / 2))
+    return beta
+
+
+def forward_sample(x0, t, steps, start=0.0001, end=0.02, scheduler='cos'):
+    if scheduler == 'cos':
+        betas = beta_cos(steps, start, end).to(x0.device)
+    else:
+        betas = torch.linspace(start, end, steps).to(x0.device)
     alphas = 1 - betas
     alpha_hat = torch.cumprod(alphas, dim=0)
     alpha_hat_t = torch.gather(alpha_hat, dim=-1,
                                index=t.to(x0.device)).view(-1, 1, 1, 1)
-    noise = torch.randn_like(x0).to(x0.device)
+    noise = torch.randn_like(x0, device=x0.device)
     mean = alpha_hat_t.sqrt() * x0
     var = torch.sqrt(1 - alpha_hat_t) * noise
     xt = mean + var
