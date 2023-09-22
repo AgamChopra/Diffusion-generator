@@ -3,7 +3,7 @@ import torch.nn as nn
 from math import ceil
 
 
-def pad2d(input_, target):  # pads if target is bigger and crops if target is smaller
+def pad2d(input_, target):  # pads if target is bigger and crops if smaller
     delta = [target.shape[2+i] - input_.shape[2+i] for i in range(2)]
     output = nn.functional.pad(input=input_,
                                pad=(ceil(delta[1]/2),
@@ -24,18 +24,28 @@ class Block(nn.Module):
             self.mlp = nn.Sequential(nn.Linear(embd_dim, out_c), nn.ReLU())
 
             self.layer = nn.Sequential(nn.Conv2d(
-                in_channels=in_c, out_channels=out_c, kernel_size=3), nn.ReLU(), nn.BatchNorm2d(out_c))
+                in_channels=in_c, out_channels=out_c, kernel_size=3),
+                nn.ReLU(), nn.BatchNorm2d(out_c))
 
             self.out_block = nn.Sequential(nn.Conv2d(
-                in_channels=out_c, out_channels=out_c, kernel_size=2), nn.ReLU(), nn.BatchNorm2d(out_c))
+                in_channels=out_c, out_channels=out_c, kernel_size=2),
+                nn.ReLU(), nn.BatchNorm2d(out_c))
         else:
             self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.ReLU())
 
             self.layer = nn.Sequential(nn.Conv2d(
-                in_channels=in_c, out_channels=hid_c, kernel_size=3), nn.ReLU(), nn.BatchNorm2d(hid_c))
+                in_channels=in_c, out_channels=hid_c, kernel_size=3),
+                nn.ReLU(), nn.BatchNorm2d(hid_c))
 
-            self.out_block = nn.Sequential(nn.Conv2d(in_channels=hid_c, out_channels=hid_c, kernel_size=2), nn.ReLU(), nn.BatchNorm2d(hid_c),
-                                           nn.ConvTranspose2d(in_channels=hid_c, out_channels=out_c, kernel_size=2, stride=2), nn.ReLU(), nn.BatchNorm2d(out_c))
+            self.out_block = nn.Sequential(nn.Conv2d(in_channels=hid_c,
+                                                     out_channels=hid_c,
+                                                     kernel_size=2),
+                                           nn.ReLU(), nn.BatchNorm2d(hid_c),
+                                           nn.ConvTranspose2d(in_channels=hid_c,
+                                                              out_channels=out_c,
+                                                              kernel_size=2,
+                                                              stride=2),
+                                           nn.ReLU(), nn.BatchNorm2d(out_c))
 
     def forward(self, x, t):
         t = self.mlp(t)
@@ -53,7 +63,8 @@ class UNet(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(emb, emb), nn.ReLU())
 
         self.layer1 = nn.Sequential(
-            nn.Conv2d(CH, int(64/n), 2, 1), nn.ReLU(), nn.BatchNorm2d(int(64/n)))
+            nn.Conv2d(CH, int(64/n), 2, 1), nn.ReLU(),
+            nn.BatchNorm2d(int(64/n)))
 
         self.layer2 = Block(in_c=int(64/n), embd_dim=emb, out_c=int(128/n))
 
@@ -95,6 +106,8 @@ class UNet(nn.Module):
             x_pad = pad2d(x, torch.ones((1, 1, 65, 65)))
         elif x.shape[2] < 71:
             x_pad = pad2d(x, torch.ones((1, 1, 71, 71)))
+        elif x.shape[2] < 135:
+            x_pad = pad2d(x, torch.ones((1, 1, 135, 135)))
         else:
             x_pad = x
 
@@ -129,15 +142,18 @@ class UNet(nn.Module):
 
 def test(device='cpu'):
     batch = 1
-    a = torch.ones((batch, 1, 64, 64), device=device)
-    t = torch.ones((batch, 64), device=device)
+    a = torch.randn((batch, 3, 128, 128), device=device)
+    t = torch.rand((batch, 64), device=device)
 
-    model = UNet(CH=1, n=64).to(device)
+    model = UNet(CH=3, n=64).to(device)
 
     b = model(a, t)
 
     print(a.shape, t.shape)
     print(b.shape)
+
+    a = (a - a.min())/(a.max() - a.min())
+    b = (b - b.min())/(b.max() - b.min())
 
     from matplotlib import pyplot as plt
 

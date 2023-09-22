@@ -16,7 +16,7 @@ from torch.utils.data import DataLoader
 
 from models import UNet
 from helper import show_images, getPositionEncoding, forward_sample, Diffusion
-from helper import distributions
+from helper import distributions, norm
 
 
 def fetch_data(image_size=64):
@@ -26,7 +26,7 @@ def fetch_data(image_size=64):
             transforms.Resize(image_size),
             transforms.CenterCrop(image_size),
             transforms.ToTensor()
-        ]), download=True)
+        ]), download=False)
 
     return dataset
 
@@ -106,27 +106,31 @@ def fin(iterations=100):
     print(idx)
 
     x = torch.randn((iterations, 3, 64, 64)).cuda()
+    x_min, x_max = x.min().item(), x.max().item()
+    print(x_min, x_max)
+
     imgs = []
 
     for t in trange(0, 1000):
         x = torch.clamp(diffusion.backward(
-            x, torch.tensor(999 - t), model), -3, 3)
+            x, torch.tensor(999 - t), model), x_min, x_max)
         if t in idx:
-            imgs.append(x[0:1])
+            imgs.append(norm(x[0:1]))
 
     imgs = torch.cat(imgs, dim=0)
     print(imgs.shape)
     show_images(imgs.cpu(), 16, 4)
-    show_images(x.cpu(), iterations, int(iterations ** 0.5))
+    show_images(norm(x).cpu(), iterations, int(iterations ** 0.5))
+    print(x.min(), x.max(), x.mean())
     return x.cpu()
 
 
 if __name__ == '__main__':
-    itr = 64
+    itr = 16
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
         train(path='R:/git projects/parameters/', epochs=2000,
-              err_func=nn.HuberLoss(delta=0.06), lr=1E-4, batch_size=32,
+              err_func=nn.HuberLoss(delta=0.06), lr=1E-4, batch_size=64,
               steps=1000, n=1, emb=64, device='cuda')
     else:
         y = fin(iterations=itr)

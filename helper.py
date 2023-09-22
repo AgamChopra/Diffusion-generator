@@ -7,7 +7,12 @@ import torch
 import matplotlib.pyplot as plt
 
 
-def show_images(data, num_samples=9, cols=3, mode=True, size=(5, 5), dpi=150):
+def norm(x):
+    return (x - x.min()) / (x.max() - x.min())
+
+
+def show_images(data, num_samples=9, cols=3, mode=True,
+                size=(15, 15), dpi=500):
     data = (data - data.min()) / (data.max() - data.min())
     plt.figure(figsize=size, dpi=dpi)
     for i, img in enumerate(data):
@@ -28,20 +33,20 @@ def show_images(data, num_samples=9, cols=3, mode=True, size=(5, 5), dpi=150):
 def distributions(x, y):
     plt.figure(figsize=(10, 5), dpi=500)
 
-    idx = torch.linspace(-3, 3, 50)
+    idx = torch.linspace(-4.7, 4.7, 256)
     noise = torch.randn((x.shape))
 
-    d0 = torch.histc(noise, bins=50, min=-3, max=3)
-    d1 = torch.histc(x, bins=50, min=-3, max=3)
-    d2 = torch.histc(y, bins=50, min=-3, max=3)
+    d0 = torch.histc(noise, bins=256, min=-4.7, max=4.7)
+    d1 = torch.histc(x, bins=256, min=-4.7, max=4.7)
+    d2 = torch.histc(y, bins=256, min=-4.7, max=4.7)
 
     d0 /= d0.max()
     d1 /= d1.max()
     d2 /= d2.max()
 
-    plt.plot(idx, d0, 'k.', label='Noise')
-    plt.plot(idx, d1, 'm.', label='Target')
-    plt.plot(idx, d2, 'r.', label='Predicted')
+    plt.plot(idx, d0, 'k-', label='Noise')
+    plt.plot(idx, d1, 'm-', label='Target')
+    plt.plot(idx, d2, 'r-', label='Predicted')
     plt.legend()
     plt.title(f'n = {x.shape[0]}')
     plt.show()
@@ -57,17 +62,30 @@ def getPositionEncoding(seq_len, d=64, n=10000):
     return P
 
 
-def beta_cos(steps, start, end):
-    x = torch.linspace(start, 1., steps, dtype=torch.float)
-    beta = end * (1 - torch.cos(x * torch.pi / 2))
-    return beta
+def get_cos_betas(steps, max_beta=0.999):
+    def alpha_bar(t): return torch.cos((t + 0.008) / 1.008 * torch.pi / 2) ** 2
+    i = torch.linspace(0, steps - 1, steps)
+    t1 = i / steps
+    t2 = (i + 1) / steps
+    betas = 1 - alpha_bar(t2) / alpha_bar(t1)
+    betas_clipped = torch.clamp(betas, 0., max_beta)
+    return betas_clipped
 
 
-def forward_sample(x0, t, steps, start=0.0001, end=0.02, scheduler='cos'):
-    if scheduler == 'cos':
-        betas = beta_cos(steps, start, end).to(x0.device)
+def get_betas(steps=1000, scheduler='lin'):
+    if scheduler == 'lin':
+        scale = 1000 / steps
+        start = scale * 0.0001
+        end = scale * 0.02
+        return torch.linspace(start, end, steps)
+    elif scheduler == 'cos':
+        return get_cos_betas(steps)
     else:
-        betas = torch.linspace(start, end, steps).to(x0.device)
+        raise NotImplementedError(f"scheduler not implemented: {scheduler}")
+
+
+def forward_sample(x0, t, steps, scheduler='lin'):
+    betas = get_betas(steps, scheduler).to(x0.device)
     alphas = 1 - betas
     alpha_hat = torch.cumprod(alphas, dim=0)
     alpha_hat_t = torch.gather(alpha_hat, dim=-1,
@@ -80,17 +98,22 @@ def forward_sample(x0, t, steps, start=0.0001, end=0.02, scheduler='cos'):
 
 
 class Diffusion:
-    def __init__(self, start=0.0001, end=0.02, steps=1000, emb=64):
+    def __init__(self, start=0.0001, end=0.02, steps=1000,
+                 emb=64, scheduler='lin'):
         self.start = start
         self.end = end
         self.steps = steps
-        self.beta = torch.linspace(start, end, steps)
+        self.beta = get_betas(steps, scheduler)
         self.alpha = 1 - self.beta
         self.alpha_hat = torch.cumprod(self.alpha, dim=0)
         self.embeddings = getPositionEncoding(steps, d=emb, n=10000)
 
     @torch.no_grad()
     def backward(self, x, t, model):
+        t = t.to(x.device)
+        self.beta = self.beta.to(x.device)
+        self.alpha = self.alpha.to(x.device)
+        self.alpha_hat = self.alpha_hat.to(x.device)
         embeddings_t = self.embeddings[t].to(x.device)
         beta_t = torch.gather(self.beta, dim=-1,
                               index=t).view(-1, 1, 1, 1).to(x.device)

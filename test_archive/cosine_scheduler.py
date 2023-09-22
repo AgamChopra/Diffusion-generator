@@ -82,7 +82,7 @@ imgs = []
 
 for i in trange(0, steps):
     t = i * torch.ones((len(x)), dtype=torch.int64)
-    xt, _ = forward_sample(x, t, steps, scheduler='lin')
+    xt, _ = forward_sample(x, t, steps, scheduler='cos')
     if i in idx:
         show_images(xt, 16, 4, mode=False)
         imgs.append(xt[6])
