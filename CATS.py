@@ -20,6 +20,10 @@ from helper import show_images, getPositionEncoding, forward_sample, Diffusion
 from helper import distributions
 
 
+SCH = 'cos'
+STEPS = 400 if SCH == 'cos' else 1000
+
+
 TRF = transforms.Compose(
     [transforms.CenterCrop(162*2), transforms.Resize(128)])
 
@@ -125,37 +129,37 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
                        os.path.join(path, savefile))
 
 
-STEPS = 1000
-
-
 @torch.no_grad()
 def fin(iterations=100, scheduler='lin'):
     diffusion = Diffusion(steps=STEPS, scheduler=scheduler)
     path = 'R:/E/parameters/'
     savefile = "CATS-Autosave-lin.pt" if scheduler == 'lin' else \
         "CATS-Autosave-cos.pt"
+
     model = UNet(CH=3, emb=64, n=1).cuda()
+
     try:
         model.load_state_dict(torch.load(
             os.path.join(path, savefile)))
     except Exception:
         print('paramerts failed to load from last run')
-    model.eval()
-    idx = torch.linspace(0, 999, 64, dtype=torch.int).cuda()
 
+    model.eval()
+
+    idx = torch.linspace(0, STEPS - 1, 64, dtype=torch.int).cuda()
     imgs = []
 
     x = torch.randn((itr, 3, 128, 128), device='cuda')
-    show_images(x.cpu(), 1, 1, mode=False, dpi=150, size=(5, 5))
-    imgs.append(x[0:1])
     x_min, x_max = x.min().item(), x.max().item()
     print(x_min, x_max)
+
+    imgs.append(x[0:1])
+    # show_images(x.cpu(), 4, 2, mode=False, size=(3, 4.5), dpi=256)
 
     for t in trange(0, STEPS):
         x = torch.clamp(diffusion.backward(
             x, torch.tensor(STEPS - t - 1), model), -4.7, 4.7)
-        show_images(x.cpu(), 1, 1, mode=False,
-                    dpi=150, size=(5, 5))
+        # show_images(x.cpu(), 4, 2, mode=False, size=(3, 4.5), dpi=256)
         if t in idx[1:]:
             imgs.append(x[0:1])
 
@@ -167,22 +171,25 @@ def fin(iterations=100, scheduler='lin'):
 
 if __name__ == '__main__':
     itr = 16
-    scheduler = 'lin'
+    scheduler = SCH
 
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
         train(path='R:/E/parameters/', epochs=1000,
-              err_func=nn.SmoothL1Loss(), lr=1E-3, batch_size=16,
+              err_func=nn.SmoothL1Loss(), lr=1E-3, batch_size=itr,
               steps=STEPS, n=1, emb=64, device='cuda', scheduler=scheduler)
     else:
         y = fin(iterations=itr, scheduler=scheduler)
         print(y.shape, y.max(), y.min())
-        data = Loader(batch_size=itr)
-        for x in data.data_loader:
-            break
-        x = Trf(x)
-        print(x.shape, x.max(), x.min())
-        show_images(x.cpu(), itr, int(itr ** 0.5), mode=False)
-        distributions(x[:, 0], y[:, 0])
-        distributions(x[:, 1], y[:, 1])
-        distributions(x[:, 2], y[:, 2])
+# =============================================================================
+#         data = Loader(batch_size=itr)
+#         for x in data.data_loader:
+#             break
+#         x = Trf(x)
+#         print(x.shape, x.max(), x.min())
+#         show_images(x.cpu(), itr, int(itr ** 0.5), mode=False)
+#         distributions(x[:, 0], y[:, 0])
+#         distributions(x[:, 1], y[:, 1])
+#         distributions(x[:, 2], y[:, 2])
+#
+# =============================================================================
