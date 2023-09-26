@@ -20,7 +20,11 @@ from helper import show_images, getPositionEncoding, forward_sample, Diffusion
 from helper import distributions
 
 
-SCH = 'cos'
+EPS = 1000
+LR = 1E-3
+ITR = 9
+N = 0.25
+SCH = 'lin'
 STEPS = 400 if SCH == 'cos' else 1000
 
 
@@ -29,6 +33,10 @@ TRF = transforms.Compose(
 
 
 def Trf(x):
+    x = torch.cat([transforms.functional.rotate(
+        x[i:i+1], random.randint(-45, 45),
+        interpolation=transforms.InterpolationMode.BILINEAR) for i in range(
+            len(x))], dim=0)
     return TRF(x)
 
 
@@ -85,7 +93,7 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
     embds = getPositionEncoding(steps).to(device)
 
     for eps in range(epochs):
-        if (eps + 1) % 100 == 0:
+        if (eps + 1) % 250 == 0:
             for param in optimizer.param_groups:
                 param['lr'] *= 0.1
             print('***updated learning rate***')
@@ -115,7 +123,7 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
         train_error.append(running_error / avg_fact)
         print(f'Average Error: {train_error[-1]}')
 
-        if eps % 50 == 0:
+        if eps % 250 == 0:
             plt.figure(figsize=(10, 5))
             plt.title("Training Noise Prediction Error")
             plt.plot(train_error, label='Average Error per Epoch')
@@ -128,6 +136,9 @@ def train(path, epochs=2000, lr=1E-6, batch_size=64, steps=1000, n=1, emb=64,
             torch.save(model.state_dict(),
                        os.path.join(path, savefile))
 
+    torch.save(model.state_dict(),
+               os.path.join(path, savefile))
+
 
 @torch.no_grad()
 def fin(iterations=100, scheduler='lin'):
@@ -136,7 +147,7 @@ def fin(iterations=100, scheduler='lin'):
     savefile = "CATS-Autosave-lin.pt" if scheduler == 'lin' else \
         "CATS-Autosave-cos.pt"
 
-    model = UNet(CH=3, emb=64, n=1).cuda()
+    model = UNet(CH=3, emb=64, n=N).cuda()
 
     try:
         model.load_state_dict(torch.load(
@@ -170,26 +181,24 @@ def fin(iterations=100, scheduler='lin'):
 
 
 if __name__ == '__main__':
-    itr = 16
+    itr = ITR
     scheduler = SCH
 
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
-        train(path='R:/E/parameters/', epochs=1000,
-              err_func=nn.SmoothL1Loss(), lr=1E-3, batch_size=itr,
-              steps=STEPS, n=1, emb=64, device='cuda', scheduler=scheduler)
+        train(path='R:/E/parameters/', epochs=EPS,
+              err_func=nn.L1Loss(), lr=LR, batch_size=itr,
+              steps=STEPS, n=N, emb=64, device='cuda', scheduler=scheduler)
     else:
         y = fin(iterations=itr, scheduler=scheduler)
         print(y.shape, y.max(), y.min())
-# =============================================================================
-#         data = Loader(batch_size=itr)
-#         for x in data.data_loader:
-#             break
-#         x = Trf(x)
-#         print(x.shape, x.max(), x.min())
-#         show_images(x.cpu(), itr, int(itr ** 0.5), mode=False)
-#         distributions(x[:, 0], y[:, 0])
-#         distributions(x[:, 1], y[:, 1])
-#         distributions(x[:, 2], y[:, 2])
-#
-# =============================================================================
+        data = Loader(batch_size=itr)
+        for x in data.data_loader:
+            break
+        x = Trf(x)
+        print(x.shape, x.max(), x.min())
+        show_images(x.cpu(), itr, int(itr ** 0.5), mode=False)
+        distributions(x[:, 0], y[:, 0])
+        distributions(x[:, 1], y[:, 1])
+        distributions(x[:, 2], y[:, 2])
+
