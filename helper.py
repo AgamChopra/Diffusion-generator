@@ -4,16 +4,25 @@ Created on Wed Aug 23 19:21:10 2023
 @author: Agam Chopra
 """
 import torch
+import torch.nn as nn
+from pytorch_msssim import SSIM
 import matplotlib.pyplot as plt
 
 
 def norm(x):
-    return (x - x.min()) / (x.max() - x.min())
+    try:
+        min_val = x.amin(dim=(1, 2, 3), keepdim=True)
+        max_val = x.amax(dim=(1, 2, 3), keepdim=True)
+        normalized_x = (x - min_val) / (max_val - min_val + 1e-9)
+        return normalized_x
+
+    except (Exception):
+        return (x - x.min()) / (x.max() - x.min() + 1E-9)
 
 
 def show_images(data, num_samples=9, cols=3, mode=True,
-                size=(15, 15), dpi=500):
-    data = (data - data.min()) / (data.max() - data.min())
+                size=(15, 15), dpi=500, cmap='magma'):
+    data = norm(data)
     plt.figure(figsize=size, dpi=dpi)
     for i, img in enumerate(data):
         if i == num_samples:
@@ -21,7 +30,7 @@ def show_images(data, num_samples=9, cols=3, mode=True,
         plt.subplot(int(num_samples/cols) + 1, cols, i + 1)
         plt.axis('off')
         if img.shape[0] == 1:
-            plt.imshow(img[0], cmap='magma')
+            plt.imshow(img[0], cmap=cmap)
         else:
             if mode:
                 plt.imshow(img.permute(1, 2, 0))
@@ -30,15 +39,15 @@ def show_images(data, num_samples=9, cols=3, mode=True,
     plt.show()
 
 
-def distributions(x, y):
+def distributions(x, y, bins=150, th=6):
     plt.figure(figsize=(10, 5), dpi=500)
 
-    idx = torch.linspace(-4.7, 4.7, 256)
+    idx = torch.linspace(-th, th, bins)
     noise = torch.randn((x.shape))
 
-    d0 = torch.histc(noise, bins=256, min=-4.7, max=4.7)
-    d1 = torch.histc(x, bins=256, min=-4.7, max=4.7)
-    d2 = torch.histc(y, bins=256, min=-4.7, max=4.7)
+    d0 = torch.histc(noise, bins=bins, min=-th, max=th)
+    d1 = torch.histc(x, bins=bins, min=-th, max=th)
+    d2 = torch.histc(y, bins=bins, min=-th, max=th)
 
     d0 /= d0.max()
     d1 /= d1.max()
@@ -132,3 +141,29 @@ class Diffusion:
             noise = torch.randn_like(x, device=x.device)
             varience = torch.sqrt(posterior_variance_t) * noise
             return mean + varience
+
+
+class ssim_loss(nn.Module):
+    def __init__(self, channel=3, spatial_dims=2, win_size=11, win_sigma=1.5):
+        super(ssim_loss, self).__init__()
+        self.ssim = SSIM(channel=channel, spatial_dims=spatial_dims,
+                         win_size=win_size, win_sigma=win_sigma)
+
+    def forward(self, x, y):
+        assert x.shape == y.shape, "inputs must be of same shape!"
+        loss = 1 - self.ssim(x, y)
+        return loss
+
+
+class PSNR():
+    def __init__(self, epsilon=1E-4):
+        self.name = "PSNR"
+        self.epsilon = epsilon
+
+    def __call__(self, x, y):
+        assert x.shape == y.shape, "inputs must be of same shape!"
+        mse = torch.mean((x - y) ** 2)
+        psnr = 20 * torch.log10(torch.max(x)) - 10 * torch.log10(mse)
+        psnr = torch.clip(psnr, -48, 48)
+        loss = (48 - psnr) * self.epsilon
+        return loss
