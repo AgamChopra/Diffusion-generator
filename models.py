@@ -24,31 +24,31 @@ class Block(nn.Module):
         super(Block, self).__init__()
 
         if hid_c is None:
-            self.mlp = nn.Sequential(nn.Linear(embd_dim, out_c), nn.ReLU())
+            self.mlp = nn.Sequential(nn.Linear(embd_dim, out_c), nn.Mish())
 
             self.layer = nn.Sequential(nn.Conv2d(
                 in_channels=in_c, out_channels=out_c, kernel_size=3),
-                nn.ReLU(), nn.BatchNorm2d(out_c))
+                nn.Mish(), nn.BatchNorm2d(out_c))
 
             self.out_block = nn.Sequential(nn.Conv2d(
                 in_channels=out_c, out_channels=out_c, kernel_size=2),
-                nn.ReLU(), nn.BatchNorm2d(out_c))
+                nn.Mish(), nn.BatchNorm2d(out_c))
         else:
-            self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.ReLU())
+            self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.Mish())
 
             self.layer = nn.Sequential(nn.Conv2d(
                 in_channels=in_c, out_channels=hid_c, kernel_size=3),
-                nn.ReLU(), nn.BatchNorm2d(hid_c))
+                nn.Mish(), nn.BatchNorm2d(hid_c))
 
             self.out_block = nn.Sequential(nn.Conv2d(in_channels=hid_c,
                                                      out_channels=hid_c,
                                                      kernel_size=2),
-                                           nn.ReLU(), nn.BatchNorm2d(hid_c),
+                                           nn.Mish(), nn.BatchNorm2d(hid_c),
                                            nn.ConvTranspose2d(in_channels=hid_c,
                                                               out_channels=out_c,
                                                               kernel_size=2,
                                                               stride=2),
-                                           nn.ReLU(), nn.BatchNorm2d(out_c))
+                                           nn.Mish(), nn.BatchNorm2d(out_c))
 
     def forward(self, x, t):
         t = self.mlp(t)
@@ -65,37 +65,37 @@ class BlockL(nn.Module):
 
         if hid_c is None:
             self.mlp = nn.Sequential(
-                nn.Linear(embd_dim, int(out_c / 4)), nn.ReLU())
+                nn.Linear(embd_dim, int(out_c / 4)), nn.Mish())
 
             self.layer = nn.Sequential(nn.Conv2d(
                 in_channels=in_c, out_channels=int(out_c / 4), kernel_size=2),
-                nn.ReLU(), nn.BatchNorm2d(int(out_c / 4)))
+                nn.Mish(), nn.BatchNorm2d(int(out_c / 4)))
 
             self.out_block = nn.Sequential(nn.Conv2d(
                 in_channels=int(out_c / 4), out_channels=int(out_c / 2),
-                kernel_size=2), nn.ReLU(), nn.BatchNorm2d(int(out_c / 2)),
+                kernel_size=2), nn.Mish(), nn.BatchNorm2d(int(out_c / 2)),
                 nn.Conv2d(in_channels=int(out_c / 2), out_channels=out_c,
-                          kernel_size=2), nn.ReLU(), nn.BatchNorm2d(out_c))
+                          kernel_size=2), nn.Mish(), nn.BatchNorm2d(out_c))
         else:
-            self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.ReLU())
+            self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.Mish())
 
             self.layer = nn.Sequential(nn.Conv2d(
                 in_channels=in_c, out_channels=hid_c, kernel_size=2),
-                nn.ReLU(), nn.BatchNorm2d(hid_c))
+                nn.Mish(), nn.BatchNorm2d(hid_c))
 
             self.out_block = nn.Sequential(nn.Conv2d(in_channels=hid_c,
                                                      out_channels=2*hid_c,
                                                      kernel_size=2),
-                                           nn.ReLU(), nn.BatchNorm2d(2*hid_c),
+                                           nn.Mish(), nn.BatchNorm2d(2*hid_c),
                                            nn.Conv2d(in_channels=2*hid_c,
                                                      out_channels=4*hid_c,
                                                      kernel_size=2),
-                                           nn.ReLU(), nn.BatchNorm2d(4*hid_c),
+                                           nn.Mish(), nn.BatchNorm2d(4*hid_c),
                                            nn.ConvTranspose2d(in_channels=4*hid_c,
                                                               out_channels=out_c,
                                                               kernel_size=2,
                                                               stride=2),
-                                           nn.ReLU(), nn.BatchNorm2d(out_c))
+                                           nn.Mish(), nn.BatchNorm2d(out_c))
 
     def forward(self, x, t):
         t = self.mlp(t)
@@ -110,10 +110,10 @@ class UNet(nn.Module):
     def __init__(self, CH=1, emb=64, n=1):
         super(UNet, self).__init__()
         # layers
-        self.time_mlp = nn.Sequential(nn.Linear(emb, emb), nn.ReLU())
+        self.time_mlp = nn.Sequential(nn.Linear(emb, emb), nn.Mish())
 
         self.layer1 = nn.Sequential(
-            nn.Conv2d(CH, int(64/n), 2, 1), nn.ReLU(),
+            nn.Conv2d(CH, int(64/n), 2, 1), nn.Mish(),
             nn.BatchNorm2d(int(64/n)))
 
         self.layer2 = Block(in_c=int(64/n), embd_dim=emb, out_c=int(128/n))
@@ -136,21 +136,21 @@ class UNet(nn.Module):
         self.out = nn.Sequential(nn.Conv2d(in_channels=int(64/n),
                                            out_channels=int(64/n),
                                            kernel_size=1),
-                                 nn.ReLU(), nn.BatchNorm2d(int(64/n)),
+                                 nn.Mish(), nn.BatchNorm2d(int(64/n)),
                                  nn.Conv2d(in_channels=int(64/n),
                                            out_channels=CH, kernel_size=1))
 
         self.pool2 = nn.Sequential(nn.Conv2d(in_channels=int(
             128/n), out_channels=int(128/n), kernel_size=2, stride=2),
-            nn.ReLU(), nn.BatchNorm2d(int(128/n)))
+            nn.Mish(), nn.BatchNorm2d(int(128/n)))
 
         self.pool3 = nn.Sequential(nn.Conv2d(in_channels=int(
             256/n), out_channels=int(256/n), kernel_size=2, stride=2),
-            nn.ReLU(), nn.BatchNorm2d(int(256/n)))
+            nn.Mish(), nn.BatchNorm2d(int(256/n)))
 
         self.pool4 = nn.Sequential(nn.Conv2d(in_channels=int(
             512/n), out_channels=int(512/n), kernel_size=2, stride=2),
-            nn.ReLU(), nn.BatchNorm2d(int(512/n)))
+            nn.Mish(), nn.BatchNorm2d(int(512/n)))
 
     def forward(self, x, t):
         t = self.time_mlp(t)
@@ -198,29 +198,29 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(
             in_channels=CH, out_channels=int(latent/3), kernel_size=2),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/3)),
+            nn.Mish(), nn.BatchNorm2d(int(latent/3)),
             nn.Conv2d(in_channels=int(latent/3),
                       out_channels=int(latent/3), kernel_size=2, stride=2),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/3)))
+            nn.Mish(), nn.BatchNorm2d(int(latent/3)))
 
         self.layer2 = nn.Sequential(nn.Conv2d(
             in_channels=int(latent/3), out_channels=int(latent/2),
             kernel_size=2),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/2)),
+            nn.Mish(), nn.BatchNorm2d(int(latent/2)),
             nn.Conv2d(in_channels=int(latent/2),
                       out_channels=int(latent/2), kernel_size=2, stride=2),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/2)))
+            nn.Mish(), nn.BatchNorm2d(int(latent/2)))
 
         self.layer3 = nn.Sequential(nn.Conv2d(
             in_channels=int(latent/2), out_channels=latent, kernel_size=2),
-            nn.ReLU(), nn.BatchNorm2d(latent),
+            nn.Mish(), nn.BatchNorm2d(latent),
             nn.Conv2d(in_channels=latent, out_channels=latent,
                       kernel_size=2, stride=2),
-            nn.ReLU(), nn.BatchNorm2d(latent))
+            nn.Mish(), nn.BatchNorm2d(latent))
 
     def forward(self, x):
         y = self.layer3(self.layer2(self.layer1(x)))
-        return y
+        return nn.functional.tanh(y)
 
 
 class Decoder(nn.Module):
@@ -228,28 +228,28 @@ class Decoder(nn.Module):
         super(Decoder, self).__init__()
         self.layer1 = nn.Sequential(nn.Conv2d(
             in_channels=latent, out_channels=latent, kernel_size=2, padding=2),
-            nn.ReLU(), nn.BatchNorm2d(latent),
+            nn.Mish(), nn.BatchNorm2d(latent),
             nn.ConvTranspose2d(
             in_channels=latent, out_channels=int(latent/2), kernel_size=2,
             stride=2, padding=1),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/2)))
+            nn.Mish(), nn.BatchNorm2d(int(latent/2)))
 
         self.layer2 = nn.Sequential(nn.Conv2d(
             in_channels=int(latent/2), out_channels=int(latent/2),
             kernel_size=2, padding=0),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/2)),
+            nn.Mish(), nn.BatchNorm2d(int(latent/2)),
             nn.ConvTranspose2d(in_channels=int(latent/2), out_channels=int(
                 latent/3), kernel_size=2, stride=2, padding=0),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/3)))
+            nn.Mish(), nn.BatchNorm2d(int(latent/3)))
 
         self.layer3 = nn.Sequential(nn.Conv2d(
             in_channels=int(latent/3), out_channels=int(latent/3),
             kernel_size=2, padding=0),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/3)),
+            nn.Mish(), nn.BatchNorm2d(int(latent/3)),
             nn.ConvTranspose2d(in_channels=int(
                 latent/3), out_channels=int(latent/4), kernel_size=2,
                 stride=2, padding=0),
-            nn.ReLU(), nn.BatchNorm2d(int(latent/4)),
+            nn.Mish(), nn.BatchNorm2d(int(latent/4)),
             nn.Conv2d(in_channels=int(latent/4), out_channels=CH,
                       kernel_size=3, padding=0))
 

@@ -9,15 +9,27 @@ from pytorch_msssim import SSIM
 import matplotlib.pyplot as plt
 
 
+class ssim_loss(nn.Module):
+    def __init__(self, channel=3, spatial_dims=2, win_size=11, win_sigma=1.5):
+        super(ssim_loss, self).__init__()
+        self.ssim = SSIM(channel=channel, spatial_dims=spatial_dims,
+                         win_size=win_size, win_sigma=win_sigma)
+
+    def forward(self, x, y):
+        assert x.shape == y.shape, "inputs must be of same shape!"
+        loss = 1 - self.ssim(x, y)
+        return loss
+
+
 def norm(x):
     try:
         min_val = x.amin(dim=(1, 2, 3), keepdim=True)
         max_val = x.amax(dim=(1, 2, 3), keepdim=True)
-        normalized_x = (x - min_val) / (max_val - min_val + 1e-9)
+        normalized_x = (x - min_val) / (max_val - min_val + 1e-6)
         return normalized_x
 
     except (Exception):
-        return (x - x.min()) / (x.max() - x.min() + 1E-9)
+        return (x - x.min()) / (x.max() - x.min() + 1E-6)
 
 
 def show_images(data, num_samples=9, cols=3, mode=True,
@@ -99,7 +111,7 @@ def forward_sample(x0, t, steps, scheduler='lin'):
     alpha_hat = torch.cumprod(alphas, dim=0)
     alpha_hat_t = torch.gather(alpha_hat, dim=-1,
                                index=t.to(x0.device)).view(-1, 1, 1, 1)
-    noise = torch.randn_like(x0, device=x0.device)
+    noise = (norm(torch.randn_like(x0, device=x0.device)) - 0.5) * 2
     mean = alpha_hat_t.sqrt() * x0
     var = torch.sqrt(1 - alpha_hat_t) * noise
     xt = mean + var
@@ -138,32 +150,6 @@ class Diffusion:
         if t == 0:
             return mean
         else:
-            noise = torch.randn_like(x, device=x.device)
+            noise = (norm(torch.randn_like(x, device=x.device)) - 0.5) * 2
             varience = torch.sqrt(posterior_variance_t) * noise
             return mean + varience
-
-
-class ssim_loss(nn.Module):
-    def __init__(self, channel=3, spatial_dims=2, win_size=11, win_sigma=1.5):
-        super(ssim_loss, self).__init__()
-        self.ssim = SSIM(channel=channel, spatial_dims=spatial_dims,
-                         win_size=win_size, win_sigma=win_sigma)
-
-    def forward(self, x, y):
-        assert x.shape == y.shape, "inputs must be of same shape!"
-        loss = 1 - self.ssim(x, y)
-        return loss
-
-
-class PSNR():
-    def __init__(self, epsilon=1E-4):
-        self.name = "PSNR"
-        self.epsilon = epsilon
-
-    def __call__(self, x, y):
-        assert x.shape == y.shape, "inputs must be of same shape!"
-        mse = torch.mean((x - y) ** 2)
-        psnr = 20 * torch.log10(torch.max(x)) - 10 * torch.log10(mse)
-        psnr = torch.clip(psnr, -48, 48)
-        loss = (48 - psnr) * self.epsilon
-        return loss
