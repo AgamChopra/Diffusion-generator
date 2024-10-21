@@ -7,16 +7,17 @@ Created on Wed Aug 23 19:21:10 2023
 import os
 import random
 import torch
-import torchvision
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from tqdm import tqdm, trange
 from torchvision import transforms
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
+import pandas as pd
+from PIL import Image
 
 from model_v2 import Encoder, Decoder, UNet
 from helper import show_images, getPositionEncoding, forward_sample, Diffusion
-from helper import distributions, norm, ssim_loss
+from helper import distributions, norm
 
 
 print('cuda detected:', torch.cuda.is_available())
@@ -40,35 +41,53 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = False
 
 
-def fetch_data(image_size=64):
-    dataset = torchvision.datasets.CelebA(
-        root='./data', split='all',
-        transform=transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
-        ]), download=False)
+class CelebADataset(Dataset):
+    def __init__(self, root_dir, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+        self.img_dir = os.path.join(root_dir, 'img_align_celeba')
+        self.attr_file = os.path.join(root_dir, 'list_attr_celeba.txt')
+        self.attrs = pd.read_csv(
+            self.attr_file, delim_whitespace=True, header=1)
+        self.img_names = self.attrs.index.tolist()
 
-    return dataset
+    def __len__(self):
+        return len(self.img_names)
+
+    def __getitem__(self, idx):
+        img_name = os.path.join(self.img_dir, self.img_names[idx])
+        image = Image.open(img_name)
+        if self.transform:
+            image = self.transform(image)
+        attrs = self.attrs.iloc[idx].values.astype('int')
+        return image, attrs
 
 
 class Loader:
     def __init__(self, batch_size=64, img_size=64, num_workers=8):
-        dataset = fetch_data(img_size)
+
+        print('loading data...')
+        transform = transforms.Compose([
+            transforms.Resize(img_size),
+            transforms.CenterCrop(img_size),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5])
+        ])
+        dataset = CelebADataset(
+            '/home/agam/Documents/git_projects/pytorch_datasets/celeba', transform=transform)
         self.data_loader = DataLoader(
             dataset=dataset, batch_size=batch_size, shuffle=True,
             num_workers=num_workers, drop_last=True)
         self.iters = int(len(dataset) / batch_size)
+        print('done.')
 
 
 def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
-                   err_func=[nn.MSELoss(), nn.L1Loss(),
-                             ssim_loss(channel=3, spatial_dims=2)],
-                   lambdas=[0.35, 0.35, 0.3], device='cpu', img_size=64):
+                   err_func=[nn.MSELoss(), nn.L1Loss()],
+                   lambdas=[0.65, 0.35], device='cpu', img_size=64):
     data = Loader(batch_size=batch_size, img_size=img_size)
-    enc = Encoder(CH=3, latent=256).to(device)
-    dec = Decoder(CH=3, latent=256).to(device)
+    enc = Encoder(CH=3, latent=512).to(device)
+    dec = Decoder(CH=3, latent=512).to(device)
     try:
         enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt")))
         dec.load_state_dict(torch.load(os.path.join(path, "CELEB-dec.pt")))
@@ -139,18 +158,18 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
     torch.save(dec.state_dict(), os.path.join(path, "CELEB-dec.pt"))
 
 
-def train(path, epochs=2000, lr=1E-4, batch_size=128, steps=1000, emb=64,
-          err_func=nn.L1Loss(), device='cpu', img_size=64):
+def train(path, epochs=2000, lr=1E-4, batch_size=128,
+          steps=1000, emb=64, device='cpu', img_size=64):
 
     data = Loader(batch_size=batch_size, img_size=img_size)
 
-    enc = Encoder(CH=3, latent=256).to(device)
+    enc = Encoder(CH=3, latent=512).to(device)
     enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt")))
 
-    model = UNet(CH=256, emb=emb).to(device)
+    model = UNet(CH=512, emb=emb, n=16).to(device)
     try:
         model.load_state_dict(torch.load(os.path.join(path,
-                                                      "CELEB-Autosave.pt")))
+                                                      "CELEB-Autosave-Diffusion.pt")))
     except Exception:
         print('paramerts failed to load from last diffusion run')
 
@@ -159,6 +178,10 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128, steps=1000, emb=64,
     avg_fact = data.iters
     tpop = range(1, steps)
     embds = getPositionEncoding(steps).to(device)
+
+    L1 = nn.L1Loss()
+    L2 = nn.MSELoss()
+    KL = nn.KLDivLoss(log_target=True)
 
     for eps in range(epochs):
         print(f'Epoch {eps + 1}|{epochs}')
@@ -169,13 +192,17 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128, steps=1000, emb=64,
         for itr, x in enumerate(tqdm(data.data_loader)):
             optimizer.zero_grad()
             x = norm(x[0]).to(device)
-            z0 = enc(x)
+            z0 = enc(x).detach()
             t = torch.tensor(random.sample(tpop, len(z0)), device=device)
             zt, noise = forward_sample(z0, t, steps, 'lin')
             embdt = embds[t]
 
             pred_noise = model(zt, embdt)
-            error = err_func(noise, pred_noise)
+            error = 0.5 * L1(
+                noise, pred_noise) + 0.3 * L2(
+                    noise, pred_noise) + 0.2 * KL(
+                        (norm(pred_noise) + 1e-6).log(),
+                        (norm(noise) + 1e-6).log())
             error.backward()
             optimizer.step()
 
@@ -199,10 +226,10 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128, steps=1000, emb=64,
 
         if eps % 10 == 0:
             torch.save(model.state_dict(),
-                       os.path.join(path, "CELEB-Autosave.pt"))
+                       os.path.join(path, "CELEB-Autosave-Diffusion.pt"))
 
         torch.save(model.state_dict(),
-                   os.path.join(path, "CELEB-Autosave.pt"))
+                   os.path.join(path, "CELEB-Autosave-Diffusion.pt"))
 
 
 @torch.no_grad()
@@ -210,11 +237,14 @@ def fin(path, iterations=100, steps=1000):
     with torch.no_grad():
         diffusion = Diffusion(steps=steps, scheduler='lin')
 
-        model = UNet(CH=256, emb=64).cuda()
-        model.load_state_dict(
-            torch.load(os.path.join(path, "CELEB-Autosave.pt")))
+        model = UNet(CH=512, emb=64, n=16).cuda()
+        try:
+            model.load_state_dict(torch.load(os.path.join(path,
+                                                          "CELEB-Autosave-Diffusion.pt")))
+        except Exception:
+            print('paramerts failed to load from last diffusion run')
 
-        dec = Decoder(CH=3, latent=256).cuda()
+        dec = Decoder(CH=3, latent=512).cuda()
         dec.load_state_dict(
             torch.load(os.path.join(path, "CELEB-dec.pt")))
 
@@ -224,7 +254,7 @@ def fin(path, iterations=100, steps=1000):
         idx = torch.linspace(0, steps-1, 1, dtype=torch.int).cuda()
         print(idx)
 
-        z = (norm(torch.randn((iterations, 256, 15, 15)).cuda()) - 0.5) * 2
+        z = (norm(torch.randn((iterations, 512, 15, 15)).cuda()) - 0.5) * 2
         z_min, z_max = z.min().item(), z.max().item()
         print(z_min, z_max)
 
@@ -255,23 +285,25 @@ if __name__ == '__main__':
     img_size = 64
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
-        train_auto_enc(path=path, device='cuda',
-                       batch_size=64, epochs=1000, lr=1E-4, img_size=img_size)
-# =============================================================================
-#         train(path=path, epochs=2000, img_size=img_size,
-#               err_func=nn.L1Loss(), lr=1E-4, batch_size=64,
-#               steps=1000, emb=64, device='cuda')
-# =============================================================================
+        a = input('Train autoencoder(a) or diffusion(d)?(a/d)')
+        if a == 'a':
+            train_auto_enc(path=path, device='cuda',
+                           batch_size=64, epochs=1000, lr=1E-5,
+                           img_size=img_size)
+        else:
+            train(path=path, epochs=2000, img_size=img_size, lr=1E-4, batch_size=64,
+                  steps=1000, emb=64, device='cuda')
+
     else:
         y, zy = fin(path, iterations=itr, steps=1000, )
         if True:
             data = Loader(batch_size=itr, img_size=img_size)
-            enc = Encoder(CH=3, latent=256).cpu()
+            enc = Encoder(CH=3, latent=512).cpu()
             enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt"),
                                            map_location='cpu'))
             for x in data.data_loader:
-                x = (norm(x[0]) - 0.5) * 10
-                z = (norm(enc(x)) - 0.5) * 10
+                x = norm(x[0])
+                z = enc(x)
                 break
             distributions(x.detach(), y.detach(), th=5, bins=128)
             distributions(z.detach(), zy.detach(), th=5, bins=256)

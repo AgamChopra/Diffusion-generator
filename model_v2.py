@@ -79,18 +79,18 @@ class UNet(nn.Module):
 
         self.layer2 = Block(in_c=int(64*n), embd_dim=emb, out_c=int(128*n))
 
-        self.layer3 = Block(in_c=int(128*n), embd_dim=emb, out_c=int(256*n))
+        # self.layer3 = Block(in_c=int(128*n), embd_dim=emb, out_c=int(256*n))
 
         # self.layer4 = Block(in_c=int(256*n), embd_dim=emb, out_c=int(512*n))
 
-        self.layer5 = Block(in_c=int(256*n), embd_dim=emb,
-                            out_c=int(256*n), hid_c=int(512*n))
+        self.layer5 = Block(in_c=int(128*n), embd_dim=emb,
+                            out_c=int(128*n), hid_c=int(256*n))
 
         # self.layer6 = Block(in_c=int(1024*n), embd_dim=emb,
         #                     out_c=int(256*n), hid_c=int(512*n))
 
-        self.layer7 = Block(in_c=int(512*n), embd_dim=emb,
-                            out_c=int(128*n), hid_c=int(256*n))
+        # self.layer7 = Block(in_c=int(512*n), embd_dim=emb,
+        #                     out_c=int(128*n), hid_c=int(256*n))
 
         self.layer8 = Block(in_c=int(256*n), embd_dim=emb, out_c=int(64*n))
 
@@ -104,13 +104,13 @@ class UNet(nn.Module):
             128*n), out_channels=int(128*n), kernel_size=2, stride=2),
             nn.Mish(), nn.BatchNorm2d(int(128*n)))
 
-        self.pool3 = nn.Sequential(nn.Conv2d(in_channels=int(
-            256*n), out_channels=int(256*n), kernel_size=2, stride=2),
-            nn.Mish(), nn.BatchNorm2d(int(256*n)))
+        # self.pool3 = nn.Sequential(nn.Conv2d(in_channels=int(
+        #     256*n), out_channels=int(256*n), kernel_size=2, stride=2),
+        #     nn.Mish(), nn.BatchNorm2d(int(256*n)))
 
-        self.pool4 = nn.Sequential(nn.Conv2d(in_channels=int(
-            512*n), out_channels=int(512*n), kernel_size=2, stride=2),
-            nn.Mish(), nn.BatchNorm2d(int(512*n)))
+        # self.pool4 = nn.Sequential(nn.Conv2d(in_channels=int(
+        #     512*n), out_channels=int(512*n), kernel_size=2, stride=2),
+        #     nn.Mish(), nn.BatchNorm2d(int(512*n)))
 
     def forward(self, x, t):
         t = self.time_mlp(t)
@@ -120,8 +120,8 @@ class UNet(nn.Module):
         y2 = self.layer2(y, t)
         y = self.pool2(y2)
 
-        y3 = self.layer3(y, t)
-        y = self.pool3(y3)
+        # y3 = self.layer3(y, t)
+        # y = self.pool3(y3)
 
         # y4 = self.layer4(y, t)
         # y = self.pool4(y4)
@@ -131,8 +131,8 @@ class UNet(nn.Module):
         # y = torch.cat((y4, pad2d(y, y4)), dim=1)
         # y = self.layer6(y, t)
 
-        y = torch.cat((y3, pad2d(y, y3)), dim=1)
-        y = self.layer7(y, t)
+        # y = torch.cat((y3, pad2d(y, y3)), dim=1)
+        # y = self.layer7(y, t)
 
         y = torch.cat((y2, pad2d(y, y2)), dim=1)
         y = self.layer8(y, t)
@@ -203,7 +203,7 @@ class Decoder(nn.Module):
 
     def forward(self, x):
         y = self.layer3(self.layer2(self.layer1(x)))
-        return torch.tanh(y)
+        return y
 
 
 class MultiKernelConv2d(nn.Module):
