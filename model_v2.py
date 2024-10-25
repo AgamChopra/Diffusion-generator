@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from math import ceil
+from helper import bounded_gaussian_noise
 
 
 def pad2d(inpt, target):  # pads if target is bigger and crops if smaller
@@ -29,34 +30,42 @@ def pad2d(inpt, target):  # pads if target is bigger and crops if smaller
 
 
 class Block(nn.Module):
-    def __init__(self, in_c, embd_dim, out_c, hid_c=None):
+    def __init__(self, in_c, embd_dim, out_c, hid_c=None, num_groups=8):
         super(Block, self).__init__()
 
         if hid_c is None:
             self.mlp = nn.Sequential(nn.Linear(embd_dim, out_c), nn.Mish())
 
-            self.layer = nn.Sequential(MultiKernelConv2d(
-                in_channels=in_c, out_channels=out_c),
-                nn.Mish(), nn.BatchNorm2d(out_c))
+            self.layer = nn.Sequential(
+                MultiKernelConv2d(in_channels=in_c, out_channels=out_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, out_c)
+            )
 
-            self.out_block = nn.Sequential(MultiKernelConv2d(
-                in_channels=out_c, out_channels=out_c),
-                nn.Mish(), nn.BatchNorm2d(out_c))
+            self.out_block = nn.Sequential(
+                MultiKernelConv2d(in_channels=out_c, out_channels=out_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, out_c)
+            )
         else:
             self.mlp = nn.Sequential(nn.Linear(embd_dim, hid_c), nn.Mish())
 
-            self.layer = nn.Sequential(MultiKernelConv2d(
-                in_channels=in_c, out_channels=hid_c),
-                nn.Mish(), nn.BatchNorm2d(hid_c))
+            self.layer = nn.Sequential(
+                MultiKernelConv2d(in_channels=in_c, out_channels=hid_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, hid_c)
+            )
 
-            self.out_block = nn.Sequential(MultiKernelConv2d(in_channels=hid_c,
-                                                             out_channels=hid_c),
-                                           nn.Mish(), nn.BatchNorm2d(hid_c),
-                                           nn.Upsample(
-                                               scale_factor=2, mode='bilinear', align_corners=True),
-                                           MultiKernelConv2d(
-                                               in_channels=hid_c, out_channels=out_c),
-                                           nn.Mish(), nn.BatchNorm2d(out_c))
+            self.out_block = nn.Sequential(
+                MultiKernelConv2d(in_channels=hid_c, out_channels=hid_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, hid_c),
+                nn.Upsample(scale_factor=2, mode='bilinear',
+                            align_corners=True),
+                MultiKernelConv2d(in_channels=hid_c, out_channels=out_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, out_c)
+            )
 
     def forward(self, x, t):
         t = self.mlp(t)
@@ -68,49 +77,61 @@ class Block(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, CH=256, emb=64, n=4):
+    def __init__(self, CH=256, emb=64, n=4, num_groups=4):
         super(UNet, self).__init__()
-        # layers
+
         self.time_mlp = nn.Sequential(nn.Linear(emb, emb), nn.Mish())
 
         self.layer1 = nn.Sequential(
-            MultiKernelConv2d(CH, int(64*n)), nn.Mish(),
-            nn.BatchNorm2d(int(64*n)))
+            MultiKernelConv2d(CH, int(64 * n)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(64 * n))
+        )
 
-        self.layer2 = Block(in_c=int(64*n), embd_dim=emb, out_c=int(128*n))
+        self.layer2 = Block(in_c=int(64 * n), embd_dim=emb,
+                            out_c=int(128 * n), num_groups=num_groups)
 
-        # self.layer3 = Block(in_c=int(128*n), embd_dim=emb, out_c=int(256*n))
+        # Commented layers remain unchanged, can be added back similarly
+        # self.layer3 = Block(in_c=int(128 * n), embd_dim=emb, out_c=int(256 * n), num_groups=num_groups)
 
-        # self.layer4 = Block(in_c=int(256*n), embd_dim=emb, out_c=int(512*n))
+        # self.layer4 = Block(in_c=int(256 * n), embd_dim=emb, out_c=int(512 * n), num_groups=num_groups)
 
-        self.layer5 = Block(in_c=int(128*n), embd_dim=emb,
-                            out_c=int(128*n), hid_c=int(256*n))
+        self.layer5 = Block(in_c=int(128 * n), embd_dim=emb,
+                            out_c=int(128 * n), hid_c=int(256 * n), num_groups=num_groups)
 
-        # self.layer6 = Block(in_c=int(1024*n), embd_dim=emb,
-        #                     out_c=int(256*n), hid_c=int(512*n))
+        # self.layer6 = Block(in_c=int(1024 * n), embd_dim=emb, out_c=int(256 * n), hid_c=int(512 * n), num_groups=num_groups)
 
-        # self.layer7 = Block(in_c=int(512*n), embd_dim=emb,
-        #                     out_c=int(128*n), hid_c=int(256*n))
+        # self.layer7 = Block(in_c=int(512 * n), embd_dim=emb, out_c=int(128 * n), hid_c=int(256 * n), num_groups=num_groups)
 
-        self.layer8 = Block(in_c=int(256*n), embd_dim=emb, out_c=int(64*n))
+        self.layer8 = Block(in_c=int(256 * n), embd_dim=emb,
+                            out_c=int(64 * n), num_groups=num_groups)
 
-        self.out = nn.Sequential(MultiKernelConv2d(in_channels=int(64*n),
-                                                   out_channels=int(64*n)),
-                                 nn.Mish(), nn.BatchNorm2d(int(64*n)),
-                                 MultiKernelConv2d(in_channels=int(64*n),
-                                                   out_channels=CH))
+        self.out = nn.Sequential(
+            MultiKernelConv2d(in_channels=int(64 * n),
+                              out_channels=int(64 * n)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(64 * n)),
+            MultiKernelConv2d(in_channels=int(64 * n), out_channels=CH)
+        )
 
-        self.pool2 = nn.Sequential(nn.Conv2d(in_channels=int(
-            128*n), out_channels=int(128*n), kernel_size=2, stride=2),
-            nn.Mish(), nn.BatchNorm2d(int(128*n)))
+        self.pool2 = nn.Sequential(
+            nn.Conv2d(in_channels=int(128 * n),
+                      out_channels=int(128 * n), kernel_size=2, stride=2),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(128 * n))
+        )
 
-        # self.pool3 = nn.Sequential(nn.Conv2d(in_channels=int(
-        #     256*n), out_channels=int(256*n), kernel_size=2, stride=2),
-        #     nn.Mish(), nn.BatchNorm2d(int(256*n)))
+        # self.pool3 = nn.Sequential(
+        #     nn.Conv2d(in_channels=int(256 * n), out_channels=int(256 * n), kernel_size=2, stride=2),
+        #     nn.Mish(),
+        #     nn.GroupNorm(num_groups, int(256 * n))
+        # )
 
-        # self.pool4 = nn.Sequential(nn.Conv2d(in_channels=int(
-        #     512*n), out_channels=int(512*n), kernel_size=2, stride=2),
-        #     nn.Mish(), nn.BatchNorm2d(int(512*n)))
+        # self.pool4 = nn.Sequential(
+        #     nn.Conv2d(in_channels=int(512 * n), out_channels=int(512 * n), kernel_size=2, stride=2),
+        #     nn.Mish(),
+        #     nn.GroupNorm(num_groups, int(512 * n))
+        # )
 
     def forward(self, x, t):
         t = self.time_mlp(t)
@@ -141,68 +162,153 @@ class UNet(nn.Module):
 
         y = self.out(y)
 
-        return torch.tanh(y)
+        return y  # Removed torch.tanh(y)
 
 
 class Encoder(nn.Module):
-    def __init__(self, CH=1, latent=256):
+    def __init__(self, CH=1, latent=256, num_groups=4):
         super(Encoder, self).__init__()
-        self.layer1 = nn.Sequential(MultiKernelConv2d(
-            in_channels=CH, out_channels=int(latent/4)),
-            nn.Mish(), nn.BatchNorm2d(int(latent/4)),
-            nn.Conv2d(in_channels=int(
-                latent/4), out_channels=int(latent/4), kernel_size=2, stride=2),
-            nn.Mish(), nn.BatchNorm2d(int(latent/4)))
 
-        self.layer2 = nn.Sequential(MultiKernelConv2d(
-            in_channels=int(latent/4), out_channels=int(latent/2)),
-            nn.Mish(), nn.BatchNorm2d(int(latent/2)),
-            nn.Conv2d(in_channels=int(
-                latent/2), out_channels=int(latent/2), kernel_size=2, stride=2),
-            nn.Mish(), nn.BatchNorm2d(int(latent/2)))
+        # Add 1x1 convolutions to match the channel dimensions for residuals
+        self.res_conv1 = nn.Conv2d(CH, int(latent/4), kernel_size=1)
+        self.res_conv2 = nn.Conv2d(int(latent/4), int(latent/2), kernel_size=1)
+        self.res_conv3 = nn.Conv2d(int(latent/2), latent, kernel_size=1)
 
-        self.layer3 = nn.Sequential(MultiKernelConv2d(
-            in_channels=int(latent/2), out_channels=latent),
-            nn.Mish(), nn.BatchNorm2d(latent),
+        self.layer1 = nn.Sequential(
+            MultiKernelConv2d(in_channels=CH, out_channels=int(latent/4)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/4)),
+            nn.Conv2d(in_channels=int(latent/4),
+                      out_channels=int(latent/4), kernel_size=2, stride=2),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/4))
+        )
+
+        self.layer2 = nn.Sequential(
+            MultiKernelConv2d(in_channels=int(latent/4),
+                              out_channels=int(latent/2)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/2)),
+            nn.Conv2d(in_channels=int(latent/2),
+                      out_channels=int(latent/2), kernel_size=2, stride=2),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/2))
+        )
+
+        self.layer3 = nn.Sequential(
+            MultiKernelConv2d(in_channels=int(latent/2), out_channels=latent),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, latent),
             nn.Conv2d(in_channels=latent, out_channels=latent,
                       kernel_size=2, stride=2),
-            nn.Mish(), nn.BatchNorm2d(latent))
+            nn.Mish(),
+            nn.GroupNorm(num_groups, latent)
+        )
+
+        # Linear layers for mean and log-variance
+        self.fc_mu = nn.Conv2d(latent, latent, 1)
+        self.fc_logvar = nn.Conv2d(latent, latent, 1)
 
     def forward(self, x):
-        y = self.layer3(self.layer2(self.layer1(x)))
-        return torch.tanh(y)
+        # Layer 1 with residual connection
+        residual = self.res_conv1(x)  # Adjust channels
+        y = self.layer1(x)
+        y += nn.functional.interpolate(residual,
+                                       size=y.shape[2:], mode='bilinear')
+
+        # Layer 2 with residual connection
+        residual = self.res_conv2(y)  # Adjust channels
+        y = self.layer2(y)
+        y += nn.functional.interpolate(residual,
+                                       size=y.shape[2:], mode='bilinear')
+
+        # Layer 3 with residual connection
+        residual = self.res_conv3(y)  # Adjust channels
+        y = self.layer3(y)
+        y += nn.functional.interpolate(residual,
+                                       size=y.shape[2:], mode='bilinear')
+
+        # Calculate mu and logvar
+        mu = self.fc_mu(y)
+        logvar = self.fc_logvar(y)
+
+        return mu, logvar
 
 
 class Decoder(nn.Module):
-    def __init__(self, CH=1, latent=256):
+    def __init__(self, CH=1, latent=256, num_groups=4):
         super(Decoder, self).__init__()
-        self.layer1 = nn.Sequential(MultiKernelConv2d(
-            in_channels=latent, out_channels=latent),
-            nn.Mish(), nn.BatchNorm2d(latent),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
-            MultiKernelConv2d(in_channels=latent, out_channels=int(
-                latent/2)),
-            nn.Mish(), nn.BatchNorm2d(int(latent/2)))
 
-        self.layer2 = nn.Sequential(MultiKernelConv2d(
-            in_channels=int(latent/2), out_channels=int(latent/2)),
-            nn.Mish(), nn.BatchNorm2d(int(latent/2)),
-            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
-            MultiKernelConv2d(in_channels=int(
-                latent/2), out_channels=int(latent/4)),
-            nn.Mish(), nn.BatchNorm2d(int(latent/4)))
+        # Add 1x1 convolutions to match the channel dimensions for residuals
+        self.res_conv1 = nn.Conv2d(latent, int(latent/2), kernel_size=1)
+        self.res_conv2 = nn.Conv2d(int(latent/2), int(latent/4), kernel_size=1)
+        self.res_conv3 = nn.Conv2d(int(latent/4), int(latent/8), kernel_size=1)
 
-        self.layer3 = nn.Sequential(MultiKernelConv2d(
-            in_channels=int(latent/4), out_channels=int(latent/4)),
-            nn.Mish(), nn.BatchNorm2d(int(latent/4)),
+        self.layer1 = nn.Sequential(
+            MultiKernelConv2d(in_channels=latent, out_channels=latent),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, latent),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+            MultiKernelConv2d(in_channels=latent, out_channels=int(latent/2)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/2))
+        )
+
+        self.layer2 = nn.Sequential(
+            MultiKernelConv2d(in_channels=int(latent/2),
+                              out_channels=int(latent/2)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/2)),
+            nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
+            MultiKernelConv2d(in_channels=int(latent/2),
+                              out_channels=int(latent/4)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/4))
+        )
+
+        self.layer3 = nn.Sequential(
+            MultiKernelConv2d(in_channels=int(latent/4),
+                              out_channels=int(latent/4)),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/4)),
             nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True),
             MultiKernelConv2d(in_channels=int(latent/4),
                               out_channels=int(latent/8)),
-            nn.Mish(), nn.BatchNorm2d(int(latent/8)),
-            nn.Conv2d(in_channels=int(latent/8), out_channels=CH, kernel_size=1))
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(latent/8)),
+        )
 
-    def forward(self, x):
-        y = self.layer3(self.layer2(self.layer1(x)))
+        self.out = nn.Conv2d(in_channels=int(latent/8),
+                             out_channels=CH, kernel_size=1)
+
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def forward(self, mu, logvar):
+        z = self.reparameterize(mu, logvar)
+
+        # Layer 1 with residual connection
+        residual = self.res_conv1(z)  # Adjust channels
+        y = self.layer1(z)
+        y += nn.functional.interpolate(residual,
+                                       size=y.shape[2:], mode='bilinear')
+
+        # Layer 2 with residual connection
+        residual = self.res_conv2(y)  # Adjust channels
+        y = self.layer2(y)
+        y += nn.functional.interpolate(residual,
+                                       size=y.shape[2:], mode='bilinear')
+
+        # Layer 3 with residual connection
+        residual = self.res_conv3(y)  # Adjust channels
+        y = self.layer3(y)
+        y += nn.functional.interpolate(residual,
+                                       size=y.shape[2:], mode='bilinear')
+
+        y = self.out(y)
+
         return y
 
 
@@ -235,32 +341,26 @@ def test_latent(device='cpu'):
     t = torch.randn((batch, 64), device=device)
     print(x.shape, t.shape)
 
-    enc = Encoder(CH=3, latent=256).to(device)
-    dec = Decoder(CH=3, latent=256).to(device)
-    lat = UNet(CH=256, n=8, emb=64).to(device)
+    enc = Encoder(CH=3, latent=32).to(device)
+    dec = Decoder(CH=3, latent=32).to(device)
+    lat = UNet(CH=32, n=8, emb=64).to(device)
     print('models loaded')
 
-    z = enc(x)
-    print('z shape:', z.shape)
+    mu, logvar = enc(x)
+    print('mu, logvar shape:', mu.shape, logvar.shape)
 
-    z_t_p = lat(z, t)
-    print('zp shape:', z_t_p.shape)
-    print('shape z matches z_t_p:', z.shape == z_t_p.shape)
-
-    x_p = dec(z)
+    x_p = dec(mu, logvar)
     print(x_p.shape)
+
+    z_t_p = lat(torch.rand_like(mu, device=mu.device), t)
+    print('zp shape:', z_t_p.shape)
+    print('shape z matches z_t_p:', mu.shape == z_t_p.shape)
 
     from matplotlib import pyplot as plt
     from helper import norm
 
     plt.imshow(norm(x)[0].permute(1, 2, 0).detach().cpu().numpy())
     plt.show()
-
-    plt.imshow(norm(x_p)[0].permute(1, 2, 0).detach().cpu().numpy())
-    plt.show()
-
-    x_p = dec(z_t_p)
-    print(x_p.shape)
 
     plt.imshow(norm(x_p)[0].permute(1, 2, 0).detach().cpu().numpy())
     plt.show()

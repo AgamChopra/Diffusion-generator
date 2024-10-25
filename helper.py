@@ -9,6 +9,19 @@ from pytorch_msssim import SSIM
 import matplotlib.pyplot as plt
 
 
+def plot_grad_hist(named_parameters):
+    for n, p in named_parameters:
+        if p.requires_grad and p.grad is not None:
+            plt.hist(p.grad.cpu().detach().numpy().flatten(),
+                     bins=50, alpha=0.5)
+            plt.title(f"Histogram of gradients in {n}")
+            plt.xlabel("Gradient value")
+            plt.ylabel("Frequency")
+            plt.grid(True)
+            plt.show()
+        break
+
+
 class ssim_loss(nn.Module):
     def __init__(self, channel=3, spatial_dims=2, win_size=11, win_sigma=1.5):
         super(ssim_loss, self).__init__()
@@ -19,6 +32,26 @@ class ssim_loss(nn.Module):
         assert x.shape == y.shape, "inputs must be of same shape!"
         loss = 1 - self.ssim(x, y)
         return loss
+
+
+class KL_Loss(nn.Module):
+    def __init__(self):
+        super(KL_Loss, self).__init__()
+
+    def forward(self, mu, logvar):
+        assert mu.shape == logvar.shape, "inputs must be of same shape!"
+        loss = self.compute_kl_divergence(mu, logvar)
+        return loss
+
+    def compute_kl_divergence(self, mu, logvar):
+        # Calculate KL divergence term
+        kl_div = -0.5 * torch.sum(1 + logvar -
+                                  mu.pow(2) - logvar.exp(), dim=[1, 2, 3])
+
+        # Average over the batch
+        kl_div = kl_div.mean()
+
+        return kl_div
 
 
 def norm(x):
@@ -55,7 +88,7 @@ def distributions(x, y, bins=150, th=6):
     plt.figure(figsize=(10, 5), dpi=500)
 
     idx = torch.linspace(-th, th, bins)
-    noise = torch.randn((x.shape))
+    noise = bounded_gaussian_noise(x.shape)
 
     d0 = torch.histc(noise, bins=bins, min=-th, max=th)
     d1 = torch.histc(x, bins=bins, min=-th, max=th)
@@ -95,7 +128,7 @@ def get_cos_betas(steps, max_beta=0.999):
 
 def get_betas(steps=1000, scheduler='lin'):
     if scheduler == 'lin':
-        scale = 1000 / steps
+        scale = 0.1 * (1000 / steps)
         start = scale * 0.0001
         end = scale * 0.02
         return torch.linspace(start, end, steps)
@@ -105,13 +138,21 @@ def get_betas(steps=1000, scheduler='lin'):
         raise NotImplementedError(f"scheduler not implemented: {scheduler}")
 
 
+def bounded_gaussian_noise(shape, mean=0.5, std=0.5, low=-3.5, high=4.0):
+    # Generate Gaussian noise with given mean and standard deviation
+    noise = torch.normal(mean=mean, std=std, size=shape)
+    # Clip the noise to be within the specified bounds
+    bounded_noise = torch.clamp(noise, min=low, max=high)
+    return bounded_noise
+
+
 def forward_sample(x0, t, steps, scheduler='lin'):
     betas = get_betas(steps, scheduler).to(x0.device)
     alphas = 1 - betas
     alpha_hat = torch.cumprod(alphas, dim=0)
     alpha_hat_t = torch.gather(alpha_hat, dim=-1,
                                index=t.to(x0.device)).view(-1, 1, 1, 1)
-    noise = (norm(torch.randn_like(x0, device=x0.device)) - 0.5) * 2
+    noise = bounded_gaussian_noise(x0.shape).to(x0.device)
     mean = alpha_hat_t.sqrt() * x0
     var = torch.sqrt(1 - alpha_hat_t) * noise
     xt = mean + var
@@ -150,6 +191,6 @@ class Diffusion:
         if t == 0:
             return mean
         else:
-            noise = (norm(torch.randn_like(x, device=x.device)) - 0.5) * 2
+            noise = bounded_gaussian_noise(x.shape).to(x.device)
             varience = torch.sqrt(posterior_variance_t) * noise
             return mean + varience
