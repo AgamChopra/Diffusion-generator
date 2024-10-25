@@ -10,7 +10,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from math import ceil
-from helper import bounded_gaussian_noise
 
 
 def pad2d(inpt, target):  # pads if target is bigger and crops if smaller
@@ -235,6 +234,12 @@ class Encoder(nn.Module):
         return mu, logvar
 
 
+def reparameterize(self, mu, logvar):
+    std = torch.exp(0.5 * logvar)
+    eps = torch.randn_like(std)
+    return mu + eps * std
+
+
 class Decoder(nn.Module):
     def __init__(self, CH=1, latent=256, num_groups=4):
         super(Decoder, self).__init__()
@@ -281,13 +286,11 @@ class Decoder(nn.Module):
         self.out = nn.Conv2d(in_channels=int(latent/8),
                              out_channels=CH, kernel_size=1)
 
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5 * logvar)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
-    def forward(self, mu, logvar):
-        z = self.reparameterize(mu, logvar)
+    def forward(self, mu, logvar=None):
+        if logvar is None:
+            z = reparameterize(mu, logvar)
+        else:
+            z = mu
 
         # Layer 1 with residual connection
         residual = self.res_conv1(z)  # Adjust channels

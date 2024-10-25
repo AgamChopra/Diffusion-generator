@@ -88,7 +88,8 @@ def distributions(x, y, bins=150, th=6):
     plt.figure(figsize=(10, 5), dpi=500)
 
     idx = torch.linspace(-th, th, bins)
-    noise = bounded_gaussian_noise(x.shape)
+    # bounded_gaussian_noise(x.shape)
+    noise = torch.randn_like(x, device=x.device)
 
     d0 = torch.histc(noise, bins=bins, min=-th, max=th)
     d1 = torch.histc(x, bins=bins, min=-th, max=th)
@@ -152,7 +153,8 @@ def forward_sample(x0, t, steps, scheduler='lin'):
     alpha_hat = torch.cumprod(alphas, dim=0)
     alpha_hat_t = torch.gather(alpha_hat, dim=-1,
                                index=t.to(x0.device)).view(-1, 1, 1, 1)
-    noise = bounded_gaussian_noise(x0.shape).to(x0.device)
+    # bounded_gaussian_noise(x0.shape).to(x0.device)
+    noise = torch.randn_like(x0, device=x0.device)
     mean = alpha_hat_t.sqrt() * x0
     var = torch.sqrt(1 - alpha_hat_t) * noise
     xt = mean + var
@@ -191,6 +193,7 @@ class Diffusion:
         if t == 0:
             return mean
         else:
-            noise = bounded_gaussian_noise(x.shape).to(x.device)
+            # bounded_gaussian_noise(x.shape).to(x.device)
+            noise = torch.randn_like(x, device=x.device)
             varience = torch.sqrt(posterior_variance_t) * noise
             return mean + varience

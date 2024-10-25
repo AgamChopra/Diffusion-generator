@@ -17,9 +17,9 @@ from tqdm import tqdm, trange
 import pandas as pd
 from PIL import Image
 
-from model_v2 import Encoder, Decoder, UNet
+from model_v2 import Encoder, Decoder, UNet, reparameterize
 from helper import show_images, getPositionEncoding, forward_sample, Diffusion
-from helper import distributions, norm, bounded_gaussian_noise, plot_grad_hist
+from helper import distributions, norm, plot_grad_hist
 from helper import KL_Loss, ssim_loss
 
 
@@ -106,7 +106,7 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
     MSE = nn.MSELoss()
     SSIM = ssim_loss()
     KL = KL_Loss()
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = amp.GradScaler('cuda')
 
     dynamic_transforms = transforms.Compose([
         transforms.RandomAutocontrast(),
@@ -131,7 +131,7 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
             x = dynamic_transforms(x[0])
             x = norm(x).to(device)
 
-            with torch.cuda.amp.autocast():
+            with amp.autocast('cuda'):
                 mu, logvar = enc(x)
                 x_ = dec(mu, logvar)
 
@@ -189,6 +189,7 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
         print('Parameters failed to load from the last diffusion run')
 
     optimizer = torch.optim.AdamW(model.parameters(), lr)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     scaler = amp.GradScaler('cuda')
 
     train_error = []
@@ -218,7 +219,8 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
         for itr, x in enumerate(tqdm(data.data_loader)):
             optimizer.zero_grad()
             x = norm(x[0]).to(device)
-            z0 = enc(x).detach()
+            mu, logvar = enc(x)
+            z0 = reparameterize(mu, logvar).detach()
             t = torch.tensor(random.sample(tpop, len(z0)), device=device)
             zt, noise = forward_sample(z0, t, steps, 'lin')
             embdt = embds[t]
@@ -226,14 +228,11 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
             with amp.autocast('cuda'):
                 pred_noise = model(zt, embdt)
                 error = L1(noise, pred_noise)
-                # * L2(
-                #         noise, pred_noise) + 0.2 * KL(
-                #     (norm(pred_noise) + 1e-6).log(),
-                #     (norm(noise) + 1e-6).log()
-                # )
 
             # Backward pass with mixed precision
             scaler.scale(error).backward()
+            torch.nn.utils.clip_grad_norm_(list(model.parameters()),
+                                           max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
 
@@ -241,6 +240,8 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
 
             if itr >= avg_fact:
                 break
+
+        scheduler.step()
 
         train_error.append(running_error / avg_fact)
         print(f'Average Error: {train_error[-1]}')
@@ -286,7 +287,7 @@ def fin(path, iterations=100, steps=1000):
         idx = torch.linspace(0, steps-1, 1, dtype=torch.int).cuda()
         print(idx)
 
-        z = bounded_gaussian_noise((iterations, 512, 8, 8)).cuda()
+        z = torch.randn((iterations, 512, 8, 8)).cuda() # bounded_gaussian_noise((iterations, 512, 8, 8)).cuda()
         z_min, z_max = z.min().item(), z.max().item()
         print(z_min, z_max)
 
@@ -320,7 +321,7 @@ if __name__ == '__main__':
         a = input('Train autoencoder(a) or diffusion(d)?(a/d)')
         if a == 'a':
             train_auto_enc(path=path, device='cuda',
-                           batch_size=128, epochs=1000, lr=1E-4,
+                           batch_size=128, epochs=1000, lr=1E-5,
                            img_size=img_size)
         else:
             train(path=path, epochs=2000, img_size=img_size, lr=1E-4,
