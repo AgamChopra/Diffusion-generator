@@ -82,52 +82,53 @@ class UNet(nn.Module):
         self.time_mlp = nn.Sequential(nn.Linear(emb, emb), nn.Mish())
 
         self.layer1 = nn.Sequential(
-            MultiKernelConv2d(CH, int(64 * n)),
-            nn.Mish(),
-            nn.GroupNorm(num_groups, int(64 * n))
-        )
-
-        self.layer2 = Block(in_c=int(64 * n), embd_dim=emb,
-                            out_c=int(128 * n), num_groups=num_groups)
-
-        # Commented layers remain unchanged, can be added back similarly
-        # self.layer3 = Block(in_c=int(128 * n), embd_dim=emb, out_c=int(256 * n), num_groups=num_groups)
-
-        # self.layer4 = Block(in_c=int(256 * n), embd_dim=emb, out_c=int(512 * n), num_groups=num_groups)
-
-        self.layer5 = Block(in_c=int(128 * n), embd_dim=emb,
-                            out_c=int(128 * n), hid_c=int(256 * n), num_groups=num_groups)
-
-        # self.layer6 = Block(in_c=int(1024 * n), embd_dim=emb, out_c=int(256 * n), hid_c=int(512 * n), num_groups=num_groups)
-
-        # self.layer7 = Block(in_c=int(512 * n), embd_dim=emb, out_c=int(128 * n), hid_c=int(256 * n), num_groups=num_groups)
-
-        self.layer8 = Block(in_c=int(256 * n), embd_dim=emb,
-                            out_c=int(64 * n), num_groups=num_groups)
-
-        self.out = nn.Sequential(
-            MultiKernelConv2d(in_channels=int(64 * n),
-                              out_channels=int(64 * n)),
-            nn.Mish(),
-            nn.GroupNorm(num_groups, int(64 * n)),
-            MultiKernelConv2d(in_channels=int(64 * n), out_channels=CH)
-        )
-
-        self.pool2 = nn.Sequential(
-            nn.Conv2d(in_channels=int(128 * n),
-                      out_channels=int(128 * n), kernel_size=2, stride=2),
+            MultiKernelConv2d(CH, int(128 * n)),
             nn.Mish(),
             nn.GroupNorm(num_groups, int(128 * n))
         )
 
+        self.layer2 = Block(in_c=int(128 * n), embd_dim=emb,
+                            out_c=int(256 * n), num_groups=num_groups)
+
+        # self.layer3 = Block(in_c=int(128 * n), embd_dim=emb,
+        #                     out_c=int(256 * n), num_groups=num_groups)
+
+        # self.layer4 = Block(in_c=int(256 * n), embd_dim=emb,
+        #                     out_c=int(512 * n), num_groups=num_groups)
+
+        self.layer5 = Block(in_c=int(256 * n), embd_dim=emb,
+                            out_c=int(256 * n), hid_c=int(512 * n), num_groups=num_groups)
+
+        # self.layer6 = Block(in_c=int(1024 * n), embd_dim=emb,
+        #                     out_c=int(256 * n), hid_c=int(512 * n), num_groups=num_groups)
+
+        # self.layer7 = Block(in_c=int(512 * n), embd_dim=emb,
+        #                     out_c=int(128 * n), hid_c=int(256 * n), num_groups=num_groups)
+
+        self.layer8 = Block(in_c=int(512 * n), embd_dim=emb,
+                            out_c=int(128 * n), num_groups=num_groups)
+
+        self.out = nn.Sequential(
+            nn.Conv2d(in_channels=int(128 * n), out_channels=CH, kernel_size=1)
+        )
+
+        self.pool2 = nn.Sequential(
+            nn.Conv2d(in_channels=int(256 * n),
+                      out_channels=int(256 * n), kernel_size=2, stride=2),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, int(256 * n))
+        )
+
         # self.pool3 = nn.Sequential(
-        #     nn.Conv2d(in_channels=int(256 * n), out_channels=int(256 * n), kernel_size=2, stride=2),
+        #     nn.Conv2d(in_channels=int(256 * n),
+        #               out_channels=int(256 * n), kernel_size=2, stride=2),
         #     nn.Mish(),
         #     nn.GroupNorm(num_groups, int(256 * n))
         # )
 
         # self.pool4 = nn.Sequential(
-        #     nn.Conv2d(in_channels=int(512 * n), out_channels=int(512 * n), kernel_size=2, stride=2),
+        #     nn.Conv2d(in_channels=int(512 * n),
+        #               out_channels=int(512 * n), kernel_size=2, stride=2),
         #     nn.Mish(),
         #     nn.GroupNorm(num_groups, int(512 * n))
         # )
@@ -161,7 +162,7 @@ class UNet(nn.Module):
 
         y = self.out(y)
 
-        return y  # Removed torch.tanh(y)
+        return y
 
 
 class Encoder(nn.Module):
@@ -234,7 +235,7 @@ class Encoder(nn.Module):
         return mu, logvar
 
 
-def reparameterize(self, mu, logvar):
+def reparameterize(mu, logvar):
     std = torch.exp(0.5 * logvar)
     eps = torch.randn_like(std)
     return mu + eps * std
@@ -287,7 +288,7 @@ class Decoder(nn.Module):
                              out_channels=CH, kernel_size=1)
 
     def forward(self, mu, logvar=None):
-        if logvar is None:
+        if logvar is not None:
             z = reparameterize(mu, logvar)
         else:
             z = mu

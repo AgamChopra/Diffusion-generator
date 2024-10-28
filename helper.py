@@ -129,7 +129,7 @@ def get_cos_betas(steps, max_beta=0.999):
 
 def get_betas(steps=1000, scheduler='lin'):
     if scheduler == 'lin':
-        scale = 0.1 * (1000 / steps)
+        scale = 1000 / steps
         start = scale * 0.0001
         end = scale * 0.02
         return torch.linspace(start, end, steps)

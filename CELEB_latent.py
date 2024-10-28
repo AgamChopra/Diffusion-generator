@@ -19,7 +19,7 @@ from PIL import Image
 
 from model_v2 import Encoder, Decoder, UNet, reparameterize
 from helper import show_images, getPositionEncoding, forward_sample, Diffusion
-from helper import distributions, norm, plot_grad_hist
+from helper import distributions, norm  # , plot_grad_hist
 from helper import KL_Loss, ssim_loss
 
 
@@ -109,16 +109,18 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
     scaler = amp.GradScaler('cuda')
 
     dynamic_transforms = transforms.Compose([
-        transforms.RandomAutocontrast(),
-        transforms.RandomAdjustSharpness(sharpness_factor=2),
+        # transforms.RandomAdjustSharpness(sharpness_factor=1.2),
         transforms.RandomHorizontalFlip(),
-        transforms.RandomPerspective(
-            interpolation=transforms.functional.InterpolationMode.BILINEAR),
-        transforms.RandomAffine(degrees=25),
-        transforms.RandomResizedCrop(
-            img_size, scale=(0.8, 1.0)),  # Random cropping
-        transforms.ColorJitter(brightness=0.2, contrast=0.2,
-                               saturation=0.2)  # Color jitter
+        # transforms.RandomVerticalFlip(),
+        # transforms.RandomPerspective(
+        #     interpolation=transforms.functional.InterpolationMode.BILINEAR),
+        # transforms.RandomAffine(degrees=45,
+        #                         interpolation=transforms.functional.InterpolationMode.BILINEAR),
+        # transforms.RandomResizedCrop(
+        #     img_size, scale=(0.8, 1.2),
+        #     interpolation=transforms.functional.InterpolationMode.BILINEAR),
+        # transforms.ColorJitter(brightness=0.1, contrast=0.1,
+        #                        saturation=0.1)  # Color jitter
     ])
 
     for eps in range(epochs):
@@ -128,7 +130,10 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
 
         for itr, x in enumerate(tqdm(data.data_loader)):
             optimizer.zero_grad()
-            x = dynamic_transforms(x[0])
+            if random.random() > 0.1:
+                x = dynamic_transforms(x[0])
+            else:
+                x = x[0]
             x = norm(x).to(device)
 
             with amp.autocast('cuda'):
@@ -165,7 +170,7 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
                                    norm(x_[0:4]).cpu().detach()), dim=0),
                         num_samples=8, cols=4, dpi=200)
 
-        if (eps + 1) % 10 == 0:
+        if (eps + 1) % 1 == 0:
             torch.save(enc.state_dict(), os.path.join(path, "CELEB-enc.pt"))
             torch.save(dec.state_dict(), os.path.join(path, "CELEB-dec.pt"))
 
@@ -178,10 +183,12 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
 
     data = Loader(batch_size=batch_size, img_size=img_size)
 
-    enc = Encoder(CH=3, latent=32).to(device)
-    enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt")))
+    with torch.no_grad():
+        enc = Encoder(CH=3, latent=128, num_groups=8).eval().to(device)
+        enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt"),
+                                       map_location=device))
 
-    model = UNet(CH=32, emb=emb, n=16).to(device)
+    model = UNet(CH=128, emb=emb, n=8, num_groups=4).to(device)
     try:
         model.load_state_dict(torch.load(
             os.path.join(path, "CELEB-Autosave-Diffusion.pt")))
@@ -193,32 +200,37 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
     scaler = amp.GradScaler('cuda')
 
     train_error = []
+    train_error_h = []
+    train_error_kl = []
     avg_fact = data.iters
     tpop = range(1, steps)
     embds = getPositionEncoding(steps).to(device)
 
-    L1 = nn.L1Loss()
-    # L2 = nn.MSELoss()
-    # KL = nn.KLDivLoss(log_target=True)
-    lr_schedule = 10
+    HUBER = nn.HuberLoss()
+    KL = nn.KLDivLoss(log_target=True, reduction='batchmean')
+
+    dynamic_transforms = transforms.Compose([
+        transforms.RandomHorizontalFlip(),
+    ])
 
     for eps in range(epochs):
         print(f'Epoch {eps + 1}/{epochs}')
         model.train()
         enc.eval()
         running_error = 0.
-
-        if eps % lr_schedule == 0 and eps > 0:
-            lr_schedule *= 2
-            for param_group in optimizer.param_groups:
-                param_group['lr'] *= 0.1
+        running_error_h = 0.
+        running_error_kl = 0.
 
         lr = optimizer.param_groups[0]['lr']
         print(f'    Learning Rate: {lr}')
 
         for itr, x in enumerate(tqdm(data.data_loader)):
             optimizer.zero_grad()
-            x = norm(x[0]).to(device)
+            if random.random() > 0.1:
+                x = dynamic_transforms(x[0])
+            else:
+                x = x[0]
+            x = norm(x).to(device)
             mu, logvar = enc(x)
             z0 = reparameterize(mu, logvar).detach()
             t = torch.tensor(random.sample(tpop, len(z0)), device=device)
@@ -227,7 +239,13 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
 
             with amp.autocast('cuda'):
                 pred_noise = model(zt, embdt)
-                error = L1(noise, pred_noise)
+
+                kl_error = KL(nn.functional.log_softmax(pred_noise, dim=0),
+                              nn.functional.log_softmax(noise, dim=0))
+
+                huber_error = HUBER(noise, pred_noise)
+
+                error = huber_error + 1E-3 * kl_error
 
             # Backward pass with mixed precision
             scaler.scale(error).backward()
@@ -237,6 +255,8 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
             scaler.update()
 
             running_error += error.item()
+            running_error_h += huber_error.item()
+            running_error_kl += kl_error.item()
 
             if itr >= avg_fact:
                 break
@@ -244,22 +264,23 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
         scheduler.step()
 
         train_error.append(running_error / avg_fact)
-        print(f'Average Error: {train_error[-1]}')
-        plot_grad_hist(model.named_parameters())
+        train_error_h.append(running_error_h / avg_fact)
+        train_error_kl.append(running_error_kl / avg_fact)
+        print(f'Average Error total, huber, kl_div: {
+              train_error[-1]}, {train_error_h[-1]}, {train_error_kl[-1]}')
+        # plot_grad_hist(model.named_parameters())
 
-        if eps % 2 == 0:
+        if eps % 1 == 0:
             plt.figure(figsize=(10, 5))
             plt.title("Training Noise Prediction Error")
-            plt.plot(train_error, label='Average Error per Epoch')
+            plt.plot(train_error, label='Average Error')
+            plt.plot(train_error_h, label='Average Huber')
+            # plt.plot(train_error_kl, label='Average KL_div')
             plt.legend()
             plt.xlabel("Epochs")
             plt.ylabel("Average Error")
             plt.legend()
             plt.show()
-
-        if eps % 10 == 0:
-            torch.save(model.state_dict(), os.path.join(
-                path, "CELEB-Autosave-Diffusion.pt"))
 
         torch.save(model.state_dict(), os.path.join(
             path, "CELEB-Autosave-Diffusion.pt"))
@@ -270,24 +291,25 @@ def fin(path, iterations=100, steps=1000):
     with torch.no_grad():
         diffusion = Diffusion(steps=steps, scheduler='lin')
 
-        model = UNet(CH=512, emb=64, n=16).cuda()
+        model = UNet(CH=128, emb=64, n=8, num_groups=4).cuda()
         try:
             model.load_state_dict(
                 torch.load(os.path.join(path, "CELEB-Autosave-Diffusion.pt")))
         except Exception:
             print('paramerts failed to load from last diffusion run')
 
-        dec = Decoder(CH=3, latent=512).cuda()
+        dec = Decoder(CH=3, latent=128, num_groups=8).cuda()
         dec.load_state_dict(
             torch.load(os.path.join(path, "CELEB-dec.pt")))
 
         dec.eval()
         model.eval()
 
-        idx = torch.linspace(0, steps-1, 1, dtype=torch.int).cuda()
+        idx = torch.linspace(0, steps-1, 16, dtype=torch.int).cuda()
         print(idx)
 
-        z = torch.randn((iterations, 512, 8, 8)).cuda() # bounded_gaussian_noise((iterations, 512, 8, 8)).cuda()
+        # bounded_gaussian_noise((iterations, 512, 8, 8)).cuda()
+        z = torch.randn((iterations, 128, 8, 8)).cuda()
         z_min, z_max = z.min().item(), z.max().item()
         print(z_min, z_max)
 
@@ -295,16 +317,16 @@ def fin(path, iterations=100, steps=1000):
 
         for t in trange(0, steps):
             z = torch.clamp(diffusion.backward(
-                z, torch.tensor(steps - 1 - t), model), -1, 1)
+                z, torch.tensor(steps - 1 - t), model), -5.5, 5.5)
             if t in idx:
                 imgs.append(dec(z[0:1]))
 
         print(z.min().item(), z.max().item(), z.mean().item())
-        x = dec(z)
+        x = norm(dec(z))
         print(x.min().item(), x.max().item(), x.mean().item())
         imgs = torch.cat(imgs, dim=0)
         print(imgs.shape)
-        show_images(imgs.cpu(), 1, 4)
+        show_images(norm(imgs).cpu(), 16, 4)
         show_images(norm(x).cpu(), iterations, int(iterations ** 0.5))
         return x.cpu(), z.cpu()
 
@@ -316,6 +338,8 @@ if __name__ == '__main__':
 
     itr = 64
     img_size = 64
+    steps = 1000
+
     a = input('Train model from last checkpoint?(y/n)')
     if a == 'y':
         a = input('Train autoencoder(a) or diffusion(d)?(a/d)')
@@ -324,23 +348,34 @@ if __name__ == '__main__':
                            batch_size=128, epochs=1000, lr=1E-5,
                            img_size=img_size)
         else:
-            train(path=path, epochs=2000, img_size=img_size, lr=1E-4,
-                  batch_size=64, steps=1000, emb=64, device='cuda')
+            train(path=path, epochs=1000, img_size=img_size, lr=1E-3,
+                  batch_size=16, steps=steps, emb=64, device='cuda')
 
     else:
-        y, zy = fin(path, iterations=itr, steps=1000, )
-        if True:
+        y, zy = fin(path, iterations=itr, steps=steps)
+
+        if False:
             data = Loader(batch_size=itr, img_size=img_size)
-            enc = Encoder(CH=3, latent=32).cpu()
+            enc = Encoder(CH=3, latent=128, num_groups=8)
             enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt"),
+                                           map_location='cpu'))
+            dec = Decoder(CH=3, latent=128, num_groups=8)
+            dec.load_state_dict(torch.load(os.path.join(path, "CELEB-dec.pt"),
                                            map_location='cpu'))
             for x in data.data_loader:
                 x = norm(x[0])
-                z = enc(x)
+                mu, logvar = enc(x)
+                z = reparameterize(mu, logvar)
+                x_ = dec(mu, logvar)
                 break
-            distributions(x.detach(), y.detach(), th=5, bins=128)
+            distributions(x_.detach(), y.detach(), th=5, bins=256)
             distributions(z.detach(), zy.detach(), th=5, bins=256)
-            print(z.detach().shape, zy.detach().shape)
+
+            show_images(torch.cat((norm(x[:4]).cpu().detach(),
+                                   norm(x_[0:4]).cpu().detach(),
+                                   norm(y[0:4]).cpu().detach()), dim=0),
+                        num_samples=12, cols=4, dpi=200)
+
             show_images(torch.unsqueeze(torch.mean(
                 z.detach(), dim=1), dim=1), itr, int(itr ** 0.5))
             show_images(torch.unsqueeze(torch.mean(
