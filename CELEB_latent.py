@@ -332,59 +332,60 @@ def fin(path, iterations=100, steps=1000):
 
 
 if __name__ == '__main__':
-    path = os.path.abspath(__file__)[:-15]
-    os.chdir(path)
-    print(path)
+    with torch.no_grad():
+        path = os.path.abspath(__file__)[:-15]
+        os.chdir(path)
+        print(path)
 
-    itr = 64
-    img_size = 64
-    steps = 1000
+        itr = 256
+        img_size = 64
+        steps = 1000
 
-    a = input('Train model from last checkpoint?(y/n)')
-    if a == 'y':
-        a = input('Train autoencoder(a) or diffusion(d)?(a/d)')
-        if a == 'a':
-            train_auto_enc(path=path, device='cuda',
-                           batch_size=128, epochs=1000, lr=1E-5,
-                           img_size=img_size)
+        a = input('Train model from last checkpoint?(y/n)')
+        if a == 'y':
+            a = input('Train autoencoder(a) or diffusion(d)?(a/d)')
+            if a == 'a':
+                train_auto_enc(path=path, device='cuda',
+                               batch_size=128, epochs=1000, lr=1E-5,
+                               img_size=img_size)
+            else:
+                train(path=path, epochs=1000, img_size=img_size, lr=1E-4,
+                      batch_size=16, steps=steps, emb=64, device='cuda')
+
         else:
-            train(path=path, epochs=1000, img_size=img_size, lr=1E-4,
-                  batch_size=16, steps=steps, emb=64, device='cuda')
+            y, zy = fin(path, iterations=itr, steps=steps)
 
-    else:
-        y, zy = fin(path, iterations=itr, steps=steps)
+            if True:
+                data = Loader(batch_size=itr, img_size=img_size)
+                enc = Encoder(CH=3, latent=128, num_groups=8)
+                enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt"),
+                                               map_location='cpu'))
+                dec = Decoder(CH=3, latent=128, num_groups=8)
+                dec.load_state_dict(torch.load(os.path.join(path, "CELEB-dec.pt"),
+                                               map_location='cpu'))
+                for x in data.data_loader:
+                    x = norm(x[0])
+                    mu, logvar = enc(x)
+                    z = reparameterize(mu, logvar)
+                    x_ = dec(mu, logvar)
+                    break
+                distributions(x_.detach(), y.detach(), th=5, bins=256)
+                distributions(z.detach(), zy.detach(), th=5, bins=256)
 
-        if True:
-            data = Loader(batch_size=itr, img_size=img_size)
-            enc = Encoder(CH=3, latent=128, num_groups=8)
-            enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt"),
-                                           map_location='cpu'))
-            dec = Decoder(CH=3, latent=128, num_groups=8)
-            dec.load_state_dict(torch.load(os.path.join(path, "CELEB-dec.pt"),
-                                           map_location='cpu'))
-            for x in data.data_loader:
-                x = norm(x[0])
-                mu, logvar = enc(x)
-                z = reparameterize(mu, logvar)
-                x_ = dec(mu, logvar)
-                break
-            distributions(x_.detach(), y.detach(), th=5, bins=256)
-            distributions(z.detach(), zy.detach(), th=5, bins=256)
+                show_images(torch.cat((norm(x[:4]).cpu().detach(),
+                                       norm(x_[0:4]).cpu().detach(),
+                                       norm(y[0:4]).cpu().detach()), dim=0),
+                            num_samples=12, cols=4, dpi=200)
 
-            show_images(torch.cat((norm(x[:4]).cpu().detach(),
-                                   norm(x_[0:4]).cpu().detach(),
-                                   norm(y[0:4]).cpu().detach()), dim=0),
-                        num_samples=12, cols=4, dpi=200)
-
-            show_images(torch.unsqueeze(torch.mean(
-                z.detach(), dim=1), dim=1), itr, int(itr ** 0.5))
-            show_images(torch.unsqueeze(torch.mean(
-                zy.detach(), dim=1), dim=1), itr, int(itr ** 0.5))
-            show_images(torch.unsqueeze(torch.max(
-                z.detach(), dim=1)[0], dim=1), itr, int(itr ** 0.5))
-            show_images(torch.unsqueeze(torch.max(
-                zy.detach(), dim=1)[0], dim=1), itr, int(itr ** 0.5))
-            show_images(torch.unsqueeze(
-                z[:, 0].detach(), dim=1), itr, int(itr ** 0.5))
-            show_images(torch.unsqueeze(
-                zy[:, 0].detach(), dim=1), itr, int(itr ** 0.5))
+                show_images(z.detach().cpu().mean(dim=0).unsqueeze(dim=1),
+                            z.shape[1], int(z.shape[1] ** 0.5))
+                show_images(zy.detach().cpu().mean(dim=0).unsqueeze(dim=1),
+                            zy.shape[1], int(zy.shape[1] ** 0.5))
+                # show_images(torch.unsqueeze(torch.max(
+                #     z.detach(), dim=1)[0], dim=1), itr, int(itr ** 0.5))
+                # show_images(torch.unsqueeze(torch.max(
+                #     zy.detach(), dim=1)[0], dim=1), itr, int(itr ** 0.5))
+                # show_images(torch.unsqueeze(
+                #     z[:, 0].detach(), dim=1), itr, int(itr ** 0.5))
+                # show_images(torch.unsqueeze(
+                #     zy[:, 0].detach(), dim=1), itr, int(itr ** 0.5))
