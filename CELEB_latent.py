@@ -245,7 +245,7 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
 
                 huber_error = HUBER(noise, pred_noise)
 
-                error = huber_error + 1E-3 * kl_error
+                error = huber_error + 1E-4 * kl_error
 
             # Backward pass with mixed precision
             scaler.scale(error).backward()
@@ -274,7 +274,7 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
             plt.figure(figsize=(10, 5))
             plt.title("Training Noise Prediction Error")
             plt.plot(train_error, label='Average Error')
-            plt.plot(train_error_h, label='Average Huber')
+            # plt.plot(train_error_h, label='Average Huber')
             # plt.plot(train_error_kl, label='Average KL_div')
             plt.legend()
             plt.xlabel("Epochs")
@@ -348,13 +348,13 @@ if __name__ == '__main__':
                            batch_size=128, epochs=1000, lr=1E-5,
                            img_size=img_size)
         else:
-            train(path=path, epochs=1000, img_size=img_size, lr=1E-3,
+            train(path=path, epochs=1000, img_size=img_size, lr=1E-4,
                   batch_size=16, steps=steps, emb=64, device='cuda')
 
     else:
         y, zy = fin(path, iterations=itr, steps=steps)
 
-        if False:
+        if True:
             data = Loader(batch_size=itr, img_size=img_size)
             enc = Encoder(CH=3, latent=128, num_groups=8)
             enc.load_state_dict(torch.load(os.path.join(path, "CELEB-enc.pt"),
