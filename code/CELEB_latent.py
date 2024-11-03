@@ -101,12 +101,13 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
     optimizer = torch.optim.AdamW(
         list(enc.parameters()) + list(dec.parameters()), lr)
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scaler = amp.GradScaler('cuda')
 
     train_error = []
     MSE = nn.MSELoss()
+    MAE = nn.L1Loss()
     SSIM = ssim_loss()
     KL = KL_Loss()
-    scaler = amp.GradScaler('cuda')
 
     dynamic_transforms = transforms.Compose([
         # transforms.RandomAdjustSharpness(sharpness_factor=1.2),
@@ -142,7 +143,7 @@ def train_auto_enc(path, epochs=500, lr=1E-3, batch_size=128,
 
                 # Adjust loss weighting
                 error = 2 * SSIM(x, x_) + 10 * MSE(x, x_) + \
-                    1e-5 * KL(mu, logvar)
+                    1e-6 * KL(mu, logvar) + 10 * MAE(x, x_)
 
             scaler.scale(error).backward()
             torch.nn.utils.clip_grad_norm_(
@@ -206,7 +207,8 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
     tpop = range(1, steps)
     embds = getPositionEncoding(steps).to(device)
 
-    HUBER = nn.HuberLoss()
+    MSE = nn.MSELoss()
+    MAE = nn.L1Loss()
     KL = nn.KLDivLoss(log_target=True, reduction='batchmean')
 
     dynamic_transforms = transforms.Compose([
@@ -243,9 +245,9 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
                 kl_error = KL(nn.functional.log_softmax(pred_noise, dim=0),
                               nn.functional.log_softmax(noise, dim=0))
 
-                huber_error = HUBER(noise, pred_noise)
+                pix_error = MSE(noise, pred_noise) + MAE(noise, pred_noise)
 
-                error = huber_error + 1E-4 * kl_error
+                error = 10 * pix_error + 1E-6 * kl_error
 
             # Backward pass with mixed precision
             scaler.scale(error).backward()
@@ -255,7 +257,7 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
             scaler.update()
 
             running_error += error.item()
-            running_error_h += huber_error.item()
+            running_error_h += pix_error.item()
             running_error_kl += kl_error.item()
 
             if itr >= avg_fact:
@@ -266,8 +268,8 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
         train_error.append(running_error / avg_fact)
         train_error_h.append(running_error_h / avg_fact)
         train_error_kl.append(running_error_kl / avg_fact)
-        print(f'Average Error total, huber, kl_div: {
-              train_error[-1]}, {train_error_h[-1]}, {train_error_kl[-1]}')
+        print(f'Average Total Error: {train_error[-1]}, Pixel Error: {
+              train_error_h[-1]}, KL Divergance Error: {train_error_kl[-1]}')
         # plot_grad_hist(model.named_parameters())
 
         if eps % 1 == 0:
@@ -332,27 +334,27 @@ def fin(path, iterations=100, steps=1000):
 
 
 if __name__ == '__main__':
-    with torch.no_grad():
-        path = os.path.abspath(__file__)[:-15]
-        os.chdir(path)
-        print(path)
+    path = os.path.abspath(__file__)[:-15]
+    os.chdir(path)
+    print(path)
 
-        itr = 256
-        img_size = 64
-        steps = 1000
+    itr = 64
+    img_size = 64
+    steps = 1000
 
-        a = input('Train model from last checkpoint?(y/n)')
-        if a == 'y':
-            a = input('Train autoencoder(a) or diffusion(d)?(a/d)')
-            if a == 'a':
-                train_auto_enc(path=path, device='cuda',
-                               batch_size=128, epochs=1000, lr=1E-5,
-                               img_size=img_size)
-            else:
-                train(path=path, epochs=1000, img_size=img_size, lr=1E-4,
-                      batch_size=16, steps=steps, emb=64, device='cuda')
-
+    a = input('Train model from last checkpoint?(y/n)')
+    if a == 'y':
+        a = input('Train autoencoder(a) or diffusion(d)?(a/d)')
+        if a == 'a':
+            train_auto_enc(path=path, device='cuda',
+                           batch_size=128, epochs=1000, lr=1E-5,
+                           img_size=img_size)
         else:
+            train(path=path, epochs=1000, img_size=img_size, lr=1E-5,
+                  batch_size=16, steps=steps, emb=64, device='cuda')
+
+    else:
+        with torch.no_grad():
             y, zy = fin(path, iterations=itr, steps=steps)
 
             if True:
@@ -381,11 +383,5 @@ if __name__ == '__main__':
                             z.shape[1], int(z.shape[1] ** 0.5))
                 show_images(zy.detach().cpu().mean(dim=0).unsqueeze(dim=1),
                             zy.shape[1], int(zy.shape[1] ** 0.5))
-                # show_images(torch.unsqueeze(torch.max(
-                #     z.detach(), dim=1)[0], dim=1), itr, int(itr ** 0.5))
-                # show_images(torch.unsqueeze(torch.max(
-                #     zy.detach(), dim=1)[0], dim=1), itr, int(itr ** 0.5))
-                # show_images(torch.unsqueeze(
-                #     z[:, 0].detach(), dim=1), itr, int(itr ** 0.5))
-                # show_images(torch.unsqueeze(
-                #     zy[:, 0].detach(), dim=1), itr, int(itr ** 0.5))
+                show_images(torch.abs(z.mean(dim=0) - zy.mean(dim=0)).detach().cpu().unsqueeze(dim=1),
+                            zy.shape[1], int(zy.shape[1] ** 0.5))
