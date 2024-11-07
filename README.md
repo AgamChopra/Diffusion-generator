@@ -6,6 +6,11 @@
     <img width="300" height="250" src="https://github.com/AgamChopra/Diffusion-generator/blob/main/imgs/LDM_9.png">
     <br><i>Fig. Outputs of partially trained latent diffusion model.</i><br>
     <br>
+    <img width="200" height="155" src="https://github.com/AgamChopra/Diffusion-generator/blob/main/imgs/LDM_compare_1.png">
+    <img width="200" height="155" src="https://github.com/AgamChopra/Diffusion-generator/blob/main/imgs/LDM_compare_2.png">
+    <img width="200" height="155" src="https://github.com/AgamChopra/Diffusion-generator/blob/main/imgs/LDM_compare_3.png">
+    <br><i>Fig. Raw outputs(top row), VAE outputs(middle row), and LDM outputs(step 600...)(bottom row).</i><br>
+    <br>
     <img width="300" height="250" src="https://github.com/AgamChopra/Diffusion-generator/blob/main/imgs/faces_00-3.gif">
     <img width="300" height="250" src="https://github.com/AgamChopra/Diffusion-generator/blob/main/imgs/faces_06.png">
     <br><i>Fig. Example of a linear scheduler based backward denoising process using a vanilla diffusion model.</i><br>
