@@ -173,7 +173,7 @@ class Diffusion:
         self.embeddings = getPositionEncoding(steps, d=emb, n=10000)
 
     @torch.no_grad()
-    def backward(self, x, t, model):
+    def backward(self, x, t, model, embeddings_text=None):
         t = t.to(x.device)
         self.beta = self.beta.to(x.device)
         self.alpha = self.alpha.to(x.device)
@@ -186,8 +186,15 @@ class Diffusion:
             index=t).view(-1, 1, 1, 1).to(x.device)
         sqrt_inv_alpha_t = torch.gather(torch.sqrt(
             1.0 / self.alpha), dim=-1, index=t).view(-1, 1, 1, 1).to(x.device)
-        mean = sqrt_inv_alpha_t * \
-            (x - beta_t * model(x, embeddings_t) / sqrt_one_minus_alpha_hat_t)
+        if embeddings_text is None:
+            mean = sqrt_inv_alpha_t * \
+                (x - beta_t * model(
+                    x, embeddings_t) / sqrt_one_minus_alpha_hat_t)
+        else:
+            mean = sqrt_inv_alpha_t * \
+                (x - beta_t * model(
+                    x, embeddings_text,
+                    embeddings_t) / sqrt_one_minus_alpha_hat_t)
         posterior_variance_t = beta_t
 
         if t == 0:

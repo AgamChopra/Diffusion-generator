@@ -341,13 +341,13 @@ class MultiKernelConv2d(nn.Module):
 
 def test_latent(device='cpu'):
     batch = 1
-    x = torch.randn((batch, 3, 64, 64), device=device)
+    x = torch.randn((batch, 3, 512, 512), device=device)
     t = torch.randn((batch, 64), device=device)
     print(x.shape, t.shape)
 
-    enc = Encoder(CH=3, latent=32).to(device)
-    dec = Decoder(CH=3, latent=32).to(device)
-    lat = UNet(CH=32, n=8, emb=64).to(device)
+    enc = Encoder(CH=3, latent=128).to(device)
+    dec = Decoder(CH=3, latent=128).to(device)
+    lat = UNet(CH=128, n=8, emb=64).to(device)
     print('models loaded')
 
     mu, logvar = enc(x)
