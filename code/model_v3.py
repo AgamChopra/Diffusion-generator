@@ -1,118 +1,121 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from model_v2 import pad2d, MultiKernelConv2d
 
 
-class CrossAttention(nn.Module):
-    def __init__(self, dim, context_dim):
-        super(CrossAttention, self).__init__()
-        self.query = nn.Linear(dim, dim)
-        self.key = nn.Linear(context_dim, dim)
-        self.value = nn.Linear(context_dim, dim)
-        self.scale = dim ** -0.5
+class Block(nn.Module):
+    def __init__(self, in_c, text_dim, time_dim, out_c, hid_c=None, num_groups=8):
+        super(Block, self).__init__()
 
-    def forward(self, x, context):
-        # Ensure that the context has the same batch size as x
-        if context.dim() == 2:
-            context = context.unsqueeze(1)
+        if hid_c is None:
+            self.mlp_time = nn.Sequential(
+                nn.Linear(time_dim, out_c), nn.Mish())
+            self.mlp_text = nn.Sequential(
+                nn.Linear(text_dim, out_c), nn.Mish())
 
-        q = self.query(x)
-        k = self.key(context)
-        v = self.value(context)
+            self.layer = nn.Sequential(
+                MultiKernelConv2d(in_channels=in_c, out_channels=out_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, out_c)
+            )
 
-        attn_scores = torch.einsum('bqd,bkd->bqk', q, k) * self.scale
-        attn_weights = F.softmax(attn_scores, dim=-1)
-        attended_values = torch.einsum('bqk,bkd->bqd', attn_weights, v)
+            self.out_block = nn.Sequential(
+                MultiKernelConv2d(in_channels=out_c, out_channels=out_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, out_c)
+            )
+        else:
+            self.mlp_time = nn.Sequential(
+                nn.Linear(time_dim, hid_c), nn.Mish())
+            self.mlp_text = nn.Sequential(
+                nn.Linear(text_dim, hid_c), nn.Mish())
 
-        return attended_values
+            self.layer = nn.Sequential(
+                MultiKernelConv2d(in_channels=in_c, out_channels=hid_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, hid_c)
+            )
 
+            self.out_block = nn.Sequential(
+                MultiKernelConv2d(in_channels=hid_c, out_channels=hid_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, hid_c),
+                nn.Upsample(scale_factor=2, mode='bilinear',
+                            align_corners=True),
+                MultiKernelConv2d(in_channels=hid_c, out_channels=out_c),
+                nn.Mish(),
+                nn.GroupNorm(num_groups, out_c)
+            )
 
-class UNetBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, context_dim):
-        super(UNetBlock, self).__init__()
-        self.conv1 = nn.Conv2d(in_channels, out_channels,
-                               kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(out_channels, out_channels,
-                               kernel_size=3, padding=1)
-        self.cross_attn = CrossAttention(out_channels, context_dim)
-        self.norm = nn.GroupNorm(8, out_channels)
-        self.activation = nn.Mish()
+    def forward(self, x, txt, t):
+        t = self.mlp_time(t)
+        txt = self.mlp_text(txt)
 
-    def forward(self, x, context):
-        x = self.conv1(x)
-        x = self.activation(self.norm(x))
-        x = self.conv2(x)
-        x = self.activation(self.norm(x))
+        y = self.layer(x)
 
-        # Cross Attention over the spatial dimensions
-        b, c, h, w = x.shape
-        x_reshaped = x.view(b, c, -1).permute(0, 2, 1)  # (b, h*w, c)
-        attn_out = self.cross_attn(x_reshaped, context)
-        attn_out = attn_out.permute(0, 2, 1).view(b, c, h, w)  # (b, c, h, w)
+        t = t[(..., ) + (None, ) * 2]
+        txt = txt[(..., ) + (None, ) * 2]
 
-        return x + attn_out
+        y = y + t + txt
+        y = self.out_block(y)
+        return y
 
 
 class UNet(nn.Module):
-    def __init__(self, in_channels=3, base_channels=64,
-                 context_dim=512, time_dim=64):
+    def __init__(self, in_channels=256, time_dim=64, context_dim=512,
+                 base_channels=64, num_groups=4):
         super(UNet, self).__init__()
-        self.init_conv = nn.Conv2d(
-            in_channels, base_channels, kernel_size=3, padding=1,
-            padding_mode='reflect')
 
-        # Downsampling blocks
-        self.down1 = UNetBlock(
-            base_channels, base_channels * 2, context_dim + time_dim)
-        self.down2 = UNetBlock(
-            base_channels * 2, base_channels * 4, context_dim + time_dim)
+        self.time_mlp = nn.Sequential(nn.Linear(time_dim, time_dim), nn.Mish())
+        self.text_mlp = nn.Sequential(
+            nn.Linear(context_dim, context_dim), nn.Mish())
 
-        # Bottleneck
-        self.bottleneck = UNetBlock(
-            base_channels * 4, base_channels * 4, context_dim + time_dim)
+        self.layer1 = nn.Sequential(
+            MultiKernelConv2d(in_channels, base_channels),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, base_channels)
+        )
 
-        # Upsampling blocks
-        self.up1 = UNetBlock(
-            base_channels * 4, base_channels * 2, context_dim + time_dim)
-        self.up2 = UNetBlock(
-            base_channels * 2, base_channels, context_dim + time_dim)
+        self.layer2 = Block(in_c=base_channels, text_dim=context_dim, time_dim=time_dim,
+                            out_c=base_channels*2, num_groups=num_groups)
 
-        # Final convolution
-        self.final_conv = nn.Conv2d(
-            base_channels, in_channels, kernel_size=1)
+        self.layer5 = Block(in_c=base_channels*2, text_dim=context_dim, time_dim=time_dim,
+                            out_c=base_channels*2, hid_c=base_channels*4, num_groups=num_groups)
 
-    def forward(self, x, text_embedding, time_embedding):
-        # Concatenate conditioning signals
+        self.layer8 = Block(in_c=base_channels*4, text_dim=context_dim, time_dim=time_dim,
+                            out_c=base_channels*2, num_groups=num_groups)
 
-        if len(time_embedding.shape) < 2:
-            # print(text_embedding.shape, time_embedding.shape)
-            time_embedding = torch.stack([time_embedding for _ in range(
-                len(text_embedding))], dim=0).to(device=time_embedding.device)
-            # print(text_embedding.shape, time_embedding.shape)
+        self.out = nn.Sequential(
+            nn.Conv2d(in_channels=base_channels*2,
+                      out_channels=in_channels, kernel_size=1)
+        )
 
-        context = torch.cat([text_embedding, time_embedding], dim=-1)
+        self.pool2 = nn.Sequential(
+            nn.Conv2d(in_channels=base_channels*2,
+                      out_channels=base_channels*2, kernel_size=2, stride=2),
+            nn.Mish(),
+            nn.GroupNorm(num_groups, base_channels*2)
+        )
 
-        # Initial convolution
-        x = self.init_conv(x)
+    def forward(self, x, txt, t):
+        t = self.time_mlp(t)
+        txt = self.text_mlp(txt)
 
-        # Downsampling path
-        x = self.down1(x, context)
-        x = F.avg_pool2d(x, 2)
-        x = self.down2(x, context)
-        x = F.avg_pool2d(x, 2)
+        y = self.layer1(x)
 
-        # Bottleneck
-        x = self.bottleneck(x, context)
+        y2 = self.layer2(y, txt, t)
+        y = self.pool2(y2)
 
-        # Upsampling path
-        x = F.interpolate(x, scale_factor=2, mode='nearest')
-        x = self.up1(x, context)
-        x = F.interpolate(x, scale_factor=2, mode='nearest')
-        x = self.up2(x, context)
+        y = self.layer5(y, txt, t)
 
-        # Final convolution
-        x = self.final_conv(x)
-        return x
+        y = torch.cat((y2, pad2d(y, y2)), dim=1)
+        y = self.layer8(y, txt, t)
+        y = pad2d(y, x)
+
+        y = self.out(y)
+
+        return y
 
 
 # Example usage
