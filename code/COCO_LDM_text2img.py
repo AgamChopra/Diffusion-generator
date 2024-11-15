@@ -213,7 +213,7 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
         torch.load(os.path.join(path, "COCO-dec.pt")))
     dec.eval()
 
-    model = UNet(in_channels=32, base_channels=256,
+    model = UNet(in_channels=32, base_channels=32,
                  context_dim=512, time_dim=emb).to(device)
     try:
         model.load_state_dict(torch.load(
@@ -222,7 +222,8 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
         print('Parameters failed to load from the last diffusion run')
 
     optimizer = torch.optim.AdamW(model.parameters(), lr)
-    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    # scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, patience=10)
     scaler = amp.GradScaler('cuda')
 
     train_error = []
@@ -236,6 +237,14 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
     MAE = nn.L1Loss()
     KL = nn.KLDivLoss(log_target=True, reduction='batchmean')
 
+    lam_kl = 1E-1
+
+    dynamic_transforms = transforms.Compose([
+        transforms.RandomResizedCrop(
+            size=(img_size, img_size), scale=(0.9, 1.1)),
+        transforms.RandomHorizontalFlip(p=0.5),
+    ])
+
     for eps in range(epochs):
         print(f'Epoch {eps + 1}/{epochs}')
         model.train()
@@ -247,10 +256,19 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
         lr = optimizer.param_groups[0]['lr']
         print(f'    Learning Rate: {lr}')
 
+        if eps + 1 % 50 == 0:
+            lam_kl *= 0.1
+
         for itr, x in enumerate(tqdm(data.data_loader)):
             optimizer.zero_grad()
-            embdtxt = x[1]
-            x = norm(x[0])
+            if random.random() >= 0.5:
+                embdtxt = x[1]
+            else:
+                embdtxt = None
+            if random.random() >= 0.01:
+                x = norm(dynamic_transforms(x[0]))
+            else:
+                x = norm(x[0])
             mu, logvar = enc(x)
             z0 = reparameterize(mu, logvar).detach()
             t = torch.tensor(random.sample(tpop, len(z0)), device=device)
@@ -265,7 +283,7 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
 
                 pix_error = MSE(noise, pred_noise) + MAE(noise, pred_noise)
 
-                error = pix_error + 1E-6 * kl_error
+                error = pix_error + lam_kl * kl_error
 
             scaler.scale(error).backward()
             torch.nn.utils.clip_grad_norm_(list(model.parameters()),
@@ -280,7 +298,7 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
             if itr >= avg_fact:
                 break
 
-        scheduler.step()
+        scheduler.step(running_error / avg_fact)
 
         train_error.append(running_error / avg_fact)
         train_error_h.append(running_error_h / avg_fact)
@@ -307,7 +325,8 @@ def train(path, epochs=2000, lr=1E-4, batch_size=128,
 
 @torch.no_grad()
 def fin(path, prompts=[], steps=1000,
-        clip_model_name="openai/clip-vit-base-patch32"):
+        clip_model_name="openai/clip-vit-base-patch32",
+        guidance_scale=0.5):
     with torch.no_grad():
         iterations = len(prompts)
         diffusion = Diffusion(steps=steps, scheduler='lin')
@@ -320,7 +339,7 @@ def fin(path, prompts=[], steps=1000,
         inputs = clip_tokenizer(prompts, padding=True, return_tensors="pt")
         text_embeddings = clip_model.get_text_features(**inputs).cuda()
 
-        model = UNet(in_channels=32, base_channels=256,
+        model = UNet(in_channels=32, base_channels=64,
                      context_dim=512, time_dim=64).cuda()
         try:
             model.load_state_dict(
@@ -345,9 +364,13 @@ def fin(path, prompts=[], steps=1000,
         imgs = []
 
         for t in trange(0, steps):
-            z = torch.clamp(diffusion.backward(
+            z_c = torch.clamp(diffusion.backward(
                 z, torch.tensor(steps - 1 - t), model,
                 text_embeddings), -5.5, 5.5)
+            z_uc = torch.clamp(diffusion.backward(
+                z, torch.tensor(steps - 1 - t), model,
+                None), -5.5, 5.5)
+            z = z_uc + guidance_scale * (z_c - z_uc)
             if t in idx:
                 imgs.append(dec(z[0:1]))
 
@@ -371,66 +394,66 @@ if __name__ == '__main__':
         "A cute cat sitting by a delicious pizza",
         "A plane flying into the clouds above the mountains",
         "A toilet in the desert full of colorful lights",
-        "A person holding a smartphone in a red case.",
-        "A young woman heads a soccer ball as others watch.",
-        "A man in sunglasses is hitting a ball with a racket.",
-        "A half-eaten sandwich, waffle fries, and soda pop.",
-        "A robot painting on a canvas in a futuristic city",
-        "A giraffe wearing sunglasses at a beach party",
-        "A dog riding a skateboard in a busy city street",
-        "A wizard casting spells in a forest full of fireflies",
-        "A snowman surfing on a wave during sunset",
-        "A unicorn sitting under a rainbow in a field of flowers",
-        "A futuristic motorcycle racing through neon streets",
-        "A coffee cup with a tiny forest growing inside it",
-        "A giant rubber duck floating in the middle of a city",
-        "A squirrel holding an umbrella in a rainstorm",
-        "A haunted house with pumpkins and glowing windows",
-        "A panda playing a piano under a spotlight",
-        "A city skyline with flying cars and glowing billboards",
-        "A ballerina dancing on top of a skyscraper",
-        "A chef juggling vegetables in a busy kitchen",
-        "A polar bear wearing sunglasses and drinking a soda",
-        "A spaceship landing in the middle of a desert",
-        "A mermaid sitting on a rock with a city skyline behind",
-        "A lion with a crown sitting on a throne in a jungle",
-        "A waterfall flowing into a river of glowing blue water",
-        "A garden gnome riding a dragon through a castle",
-        "A donut shop shaped like a giant donut at night",
-        "A fox with a scarf reading a book under a tree",
-        "A moonlit beach with glowing jellyfish in the waves",
-        "A hot air balloon made of candy floating in the sky",
-        "A treehouse built on a giant mushroom in a fantasy forest",
-        "A dolphin jumping through colorful, glowing rings in the ocean",
-        "A friendly robot serving coffee at a cozy cafe",
-        "A treasure chest filled with glowing gems underwater",
-        "A n16eon-lit diner in the middle of a desert at night",
-        "A vintage car covered in vibrant graffiti parked by a mural",
-        "A giant octopus hugging a lighthouse during sunset",
-        "A fairy reading a book by a small waterfall",
-        "A skatepark on the moon with Earth visible in the background",
-        "A superhero flying through a futuristic city with tall buildings",
-        "A wolf howling under a full moon surrounded by fog",
-        "A child holding a glowing balloon in a dark forest",
-        "A futuristic lab with robots working on floating screens",
-        "A desert oasis with crystal-clear water and palm trees",
-        "A dragon breathing fire over a snowy mountain range",
-        "A whale swimming through clouds in a surreal sky",
-        "A picnic setup on a small island in the middle of a lake",
-        "A train traveling across a bridge above a cloud sea",
-        "A fox standing on a cliff looking over a misty valley",
-        "A steampunk airship flying over a Victorian city",
-        "A penguin wearing a top hat sliding on ice",
-        "A bustling marketplace with colorful fabrics and spices",
-        "A peacock spreading its feathers in a magical forest",
-        "A robot dog running through a park with other dogs",
-        "A river running through a valley with bioluminescent plants",
-        "A camel caravan traveling under a sky filled with stars",
-        "A beautiful palace built on top of a mountain peak",
-        "A butterfly with wings made of stained glass in a garden",
-        "A cityscape where every building is shaped like an animal",
-        "A group of kids playing in a magical treehouse village",
-        "A chef cooking on a floating kitchen platform in the sky",
+        # "A person holding a smartphone in a red case.",
+        # "A young woman heads a soccer ball as others watch.",
+        # "A man in sunglasses is hitting a ball with a racket.",
+        # "A half-eaten sandwich, waffle fries, and soda pop.",
+        # "A robot painting on a canvas in a futuristic city",
+        # "A giraffe wearing sunglasses at a beach party",
+        # "A dog riding a skateboard in a busy city street",
+        # "A wizard casting spells in a forest full of fireflies",
+        # "A snowman surfing on a wave during sunset",
+        # "A unicorn sitting under a rainbow in a field of flowers",
+        # "A futuristic motorcycle racing through neon streets",
+        # "A coffee cup with a tiny forest growing inside it",
+        # "A giant rubber duck floating in the middle of a city",
+        # "A squirrel holding an umbrella in a rainstorm",
+        # "A haunted house with pumpkins and glowing windows",
+        # "A panda playing a piano under a spotlight",
+        # "A city skyline with flying cars and glowing billboards",
+        # "A ballerina dancing on top of a skyscraper",
+        # "A chef juggling vegetables in a busy kitchen",
+        # "A polar bear wearing sunglasses and drinking a soda",
+        # "A spaceship landing in the middle of a desert",
+        # "A mermaid sitting on a rock with a city skyline behind",
+        # "A lion with a crown sitting on a throne in a jungle",
+        # "A waterfall flowing into a river of glowing blue water",
+        # "A garden gnome riding a dragon through a castle",
+        # "A donut shop shaped like a giant donut at night",
+        # "A fox with a scarf reading a book under a tree",
+        # "A moonlit beach with glowing jellyfish in the waves",
+        # "A hot air balloon made of candy floating in the sky",
+        # "A treehouse built on a giant mushroom in a fantasy forest",
+        # "A dolphin jumping through colorful, glowing rings in the ocean",
+        # "A friendly robot serving coffee at a cozy cafe",
+        # "A treasure chest filled with glowing gems underwater",
+        # "A n16eon-lit diner in the middle of a desert at night",
+        # "A vintage car covered in vibrant graffiti parked by a mural",
+        # "A giant octopus hugging a lighthouse during sunset",
+        # "A fairy reading a book by a small waterfall",
+        # "A skatepark on the moon with Earth visible in the background",
+        # "A superhero flying through a futuristic city with tall buildings",
+        # "A wolf howling under a full moon surrounded by fog",
+        # "A child holding a glowing balloon in a dark forest",
+        # "A futuristic lab with robots working on floating screens",
+        # "A desert oasis with crystal-clear water and palm trees",
+        # "A dragon breathing fire over a snowy mountain range",
+        # "A whale swimming through clouds in a surreal sky",
+        # "A picnic setup on a small island in the middle of a lake",
+        # "A train traveling across a bridge above a cloud sea",
+        # "A fox standing on a cliff looking over a misty valley",
+        # "A steampunk airship flying over a Victorian city",
+        # "A penguin wearing a top hat sliding on ice",
+        # "A bustling marketplace with colorful fabrics and spices",
+        # "A peacock spreading its feathers in a magical forest",
+        # "A robot dog running through a park with other dogs",
+        # "A river running through a valley with bioluminescent plants",
+        # "A camel caravan traveling under a sky filled with stars",
+        # "A beautiful palace built on top of a mountain peak",
+        # "A butterfly with wings made of stained glass in a garden",
+        # "A cityscape where every building is shaped like an animal",
+        # "A group of kids playing in a magical treehouse village",
+        # "A chef cooking on a floating kitchen platform in the sky",
     ]
 
     itr = len(prompts)
@@ -445,12 +468,13 @@ if __name__ == '__main__':
                            batch_size=64, epochs=1000, lr=3.14E-5,
                            img_size=img_size)
         else:
-            train(path=path, epochs=1000, img_size=img_size, lr=1E-6,
+            train(path=path, epochs=1000, img_size=img_size, lr=1E-3,
                   batch_size=32, steps=steps, emb=64, device='cuda')
 
     else:
         with torch.no_grad():
-            y, zy = fin(path, prompts=prompts, steps=steps)
+            for _ in range(1):
+                y, zy = fin(path, prompts=prompts, steps=steps)
 
             if True:
                 data = Loader(batch_size=itr, img_size=img_size,

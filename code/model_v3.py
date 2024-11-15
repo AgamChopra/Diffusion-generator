@@ -49,15 +49,18 @@ class Block(nn.Module):
             )
 
     def forward(self, x, txt, t):
-        t = self.mlp_time(t)
-        txt = self.mlp_text(txt)
-
         y = self.layer(x)
 
+        t = self.mlp_time(t)
         t = t[(..., ) + (None, ) * 2]
-        txt = txt[(..., ) + (None, ) * 2]
 
-        y = y + t + txt
+        if txt is not None:
+            txt = self.mlp_text(txt)
+            txt = txt[(..., ) + (None, ) * 2]
+            y = y + t + txt
+        else:
+            y = y + t
+
         y = self.out_block(y)
         return y
 
@@ -99,8 +102,9 @@ class UNet(nn.Module):
         )
 
     def forward(self, x, txt, t):
+        if txt is not None:
+            txt = self.text_mlp(txt)
         t = self.time_mlp(t)
-        txt = self.text_mlp(txt)
 
         y = self.layer1(x)
 

@@ -140,9 +140,7 @@ def get_betas(steps=1000, scheduler='lin'):
 
 
 def bounded_gaussian_noise(shape, mean=0.5, std=0.5, low=-3.5, high=4.0):
-    # Generate Gaussian noise with given mean and standard deviation
     noise = torch.normal(mean=mean, std=std, size=shape)
-    # Clip the noise to be within the specified bounds
     bounded_noise = torch.clamp(noise, min=low, max=high)
     return bounded_noise
 
@@ -153,7 +151,6 @@ def forward_sample(x0, t, steps, scheduler='lin'):
     alpha_hat = torch.cumprod(alphas, dim=0)
     alpha_hat_t = torch.gather(alpha_hat, dim=-1,
                                index=t.to(x0.device)).view(-1, 1, 1, 1)
-    # bounded_gaussian_noise(x0.shape).to(x0.device)
     noise = torch.randn_like(x0, device=x0.device)
     mean = alpha_hat_t.sqrt() * x0
     var = torch.sqrt(1 - alpha_hat_t) * noise
@@ -186,21 +183,21 @@ class Diffusion:
             index=t).view(-1, 1, 1, 1).to(x.device)
         sqrt_inv_alpha_t = torch.gather(torch.sqrt(
             1.0 / self.alpha), dim=-1, index=t).view(-1, 1, 1, 1).to(x.device)
-        if embeddings_text is None:
-            mean = sqrt_inv_alpha_t * \
-                (x - beta_t * model(
-                    x, embeddings_t) / sqrt_one_minus_alpha_hat_t)
-        else:
+        try:
             mean = sqrt_inv_alpha_t * \
                 (x - beta_t * model(
                     x, embeddings_text,
                     embeddings_t) / sqrt_one_minus_alpha_hat_t)
+        except Exception:
+            mean = sqrt_inv_alpha_t * \
+                (x - beta_t * model(
+                    x, embeddings_t) / sqrt_one_minus_alpha_hat_t)
+
         posterior_variance_t = beta_t
 
         if t == 0:
             return mean
         else:
-            # bounded_gaussian_noise(x.shape).to(x.device)
             noise = torch.randn_like(x, device=x.device)
             varience = torch.sqrt(posterior_variance_t) * noise
             return mean + varience
